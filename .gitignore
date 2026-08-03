@@ -1,0 +1,36 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# builds
+dist/
+build/
+out/
+.next/
+.open-next/
+contracts/out/
+contracts/cache/
+contracts/broadcast/*/dry-run/
+
+# cloudflare
+.wrangler/
+.dev.vars
+.dev.vars.*
+
+# env & secrets — never commit the voucher signer key
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
