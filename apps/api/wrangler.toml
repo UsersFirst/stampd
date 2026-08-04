@@ -11,6 +11,10 @@ zone_name = "usersfirst.com"
 
 [vars]
 PUBLIC_ORIGIN = "https://stampd.usersfirst.com"
+# Chain consulted when an upload is signed by a smart-contract wallet (ERC-1271/6492).
+# Plain EOA signatures never reach the RPC.
+VERIFY_CHAIN_ID = "84532"
+RPC_URL = "https://sepolia.base.org"
 
 [[r2_buckets]]
 binding = "ASSETS_BUCKET"
@@ -19,6 +23,8 @@ preview_bucket_name = "stampd-assets-preview"
 
 [env.dev.vars]
 PUBLIC_ORIGIN = "http://127.0.0.1:8787"
+VERIFY_CHAIN_ID = "84532"
+RPC_URL = "https://sepolia.base.org"
 
 [[env.dev.r2_buckets]]
 binding = "ASSETS_BUCKET"

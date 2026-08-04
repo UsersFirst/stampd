@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    name: Contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: forge fmt --check
+        run: forge fmt --check
+        working-directory: contracts
+      - name: forge build
+        run: forge build --sizes
+        working-directory: contracts
+      - name: forge test
+        run: forge test -vv
+        working-directory: contracts
+
+  typescript:
+    name: TypeScript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck every package
+        run: pnpm -r typecheck
+      - name: Build dashboard
+        run: pnpm --filter @stampd/dashboard build
+
+  abi-in-sync:
+    name: ABI matches contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: forge build
+        working-directory: contracts
+      - name: Regenerate and diff
+        run: |
+          node scripts/sync-abi.mjs
+          if ! git diff --exit-code packages/shared/src/abi.ts; then
+            echo "::error::packages/shared/src/abi.ts is stale. Run \`pnpm sync:abi\` and commit."
+            exit 1
+          fi

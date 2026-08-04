@@ -7,28 +7,36 @@
 /// Today this handles badge art and metadata. Phase 3 adds D1-backed claim codes and
 /// EIP-712 voucher signing alongside it.
 
+import {createPublicClient, http, recoverMessageAddress, isAddress} from "viem";
+import {base, baseSepolia} from "viem/chains";
+import {
+    UPLOAD_AUTH_WINDOW_SECONDS,
+    UPLOAD_HEADERS,
+    buildUploadAuthMessage,
+    sha256Hex,
+    type Address,
+} from "@stampd/shared";
+
 export interface Env {
     ASSETS_BUCKET: R2Bucket;
     PUBLIC_ORIGIN: string;
+    /// Chain whose state is consulted to verify smart-contract-wallet signatures.
+    VERIFY_CHAIN_ID: string;
+    RPC_URL: string;
 }
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
-const ALLOWED_CONTENT_TYPES = new Set([
-    "image/png",
-    "image/jpeg",
-    "image/gif",
-    "image/webp",
-    "image/svg+xml",
-    "application/json",
-]);
+/// SVG is deliberately absent. It is an active document format: an uploaded
+/// <svg><script> would execute in this origin, which is shared with a wallet-connected
+/// dApp. The headers on asset responses are a second layer, not a licence to re-add it.
+const ALLOWED_CONTENT_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "application/json"]);
 
 const EXTENSIONS: Record<string, string> = {
     "image/png": "png",
     "image/jpeg": "jpg",
     "image/gif": "gif",
     "image/webp": "webp",
-    "image/svg+xml": "svg",
     "application/json": "json",
 };
 
@@ -39,13 +47,50 @@ function json(body: unknown, status = 200): Response {
     });
 }
 
-/// Content-addressed keys: the same bytes always land at the same URL, so a re-upload is
-/// idempotent and metadata JSON pointing at art never goes stale.
-async function contentKey(bytes: ArrayBuffer, contentType: string): Promise<string> {
-    const digest = await crypto.subtle.digest("SHA-256", bytes);
-    const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
-    const extension = EXTENSIONS[contentType] ?? "bin";
-    return `${hex.slice(0, 32)}.${extension}`;
+/// Verifies the wallet signature over (address, body hash, timestamp). Returns an error
+/// Response when the request should be rejected, or null when it is authorized.
+async function checkUploadAuth(request: Request, env: Env, digest: string): Promise<Response | null> {
+    const address = request.headers.get(UPLOAD_HEADERS.address);
+    const issued = request.headers.get(UPLOAD_HEADERS.issued);
+    const signature = request.headers.get(UPLOAD_HEADERS.signature);
+
+    if (!address || !issued || !signature) return json({error: "Missing upload authorization."}, 401);
+    if (!isAddress(address)) return json({error: "Malformed address."}, 401);
+    if (!/^0x[0-9a-fA-F]+$/.test(signature)) return json({error: "Malformed signature."}, 401);
+
+    const issuedAt = Number(issued);
+    if (!Number.isInteger(issuedAt)) return json({error: "Malformed timestamp."}, 401);
+
+    const skew = Math.abs(Math.floor(Date.now() / 1000) - issuedAt);
+    if (skew > UPLOAD_AUTH_WINDOW_SECONDS) {
+        return json({error: "Authorization expired; sign again."}, 401);
+    }
+
+    const message = buildUploadAuthMessage({address: address as Address, sha256: digest, issuedAt});
+
+    // Plain EOA signatures verify offline. Smart-contract wallets (ERC-1271/6492) need
+    // chain state, so only those pay for an RPC round-trip.
+    try {
+        const recovered = await recoverMessageAddress({message, signature: signature as `0x${string}`});
+        if (recovered.toLowerCase() === address.toLowerCase()) return null;
+    } catch {
+        // fall through to on-chain verification
+    }
+
+    try {
+        const chain = env.VERIFY_CHAIN_ID === String(base.id) ? base : baseSepolia;
+        const client = createPublicClient({chain, transport: http(env.RPC_URL)});
+        const valid = await client.verifyMessage({
+            address: address as Address,
+            message,
+            signature: signature as `0x${string}`,
+        });
+        if (valid) return null;
+    } catch {
+        return json({error: "Could not verify signature."}, 503);
+    }
+
+    return json({error: "Invalid signature."}, 401);
 }
 
 async function handleUpload(request: Request, env: Env): Promise<Response> {
@@ -61,14 +106,16 @@ async function handleUpload(request: Request, env: Env): Promise<Response> {
     }
 
     const bytes = await request.arrayBuffer();
-    if (bytes.byteLength > MAX_UPLOAD_BYTES) {
-        return json({error: "Upload exceeds 5 MB."}, 413);
-    }
-    if (bytes.byteLength === 0) {
-        return json({error: "Empty upload."}, 400);
-    }
+    if (bytes.byteLength > MAX_UPLOAD_BYTES) return json({error: "Upload exceeds 5 MB."}, 413);
+    if (bytes.byteLength === 0) return json({error: "Empty upload."}, 400);
 
-    const key = await contentKey(bytes, contentType);
+    // Hash first: the digest is both the authorization subject and the object key.
+    const digest = await sha256Hex(bytes);
+
+    const rejection = await checkUploadAuth(request, env, digest);
+    if (rejection) return rejection;
+
+    const key = `${digest.slice(0, 32)}.${EXTENSIONS[contentType] ?? "bin"}`;
 
     await env.ASSETS_BUCKET.put(key, bytes, {
         httpMetadata: {
@@ -88,6 +135,14 @@ async function handleAsset(key: string, env: Env): Promise<Response> {
     const headers = new Headers();
     object.writeHttpMetadata(headers);
     headers.set("etag", object.httpEtag);
+
+    // User-supplied bytes served from the same origin as a wallet-connected dApp. These
+    // stop the response being interpreted as an active document even if the stored
+    // content type is ever wrong or the allowlist is widened carelessly.
+    headers.set("content-security-policy", "default-src 'none'; sandbox");
+    headers.set("x-content-type-options", "nosniff");
+    headers.set("cross-origin-resource-policy", "same-origin");
+
     return new Response(object.body, {headers});
 }
 

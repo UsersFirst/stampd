@@ -1,5 +1,6 @@
 import {useState, type FormEvent} from "react";
-import {useAccount, useChainId, useWriteContract, useWaitForTransactionReceipt} from "wagmi";
+import {useAccount, useChainId, useSignMessage, useWriteContract, useWaitForTransactionReceipt} from "wagmi";
+import {isAddress} from "viem";
 import {
     stampd1155Abi,
     stampdAddress,
@@ -14,8 +15,8 @@ type Stage = "idle" | "uploading-art" | "uploading-metadata" | "awaiting-signatu
 
 const STAGE_LABEL: Record<Stage, string> = {
     idle: "",
-    "uploading-art": "Uploading badge art…",
-    "uploading-metadata": "Publishing metadata…",
+    "uploading-art": "Sign to upload the badge art…",
+    "uploading-metadata": "Sign to publish the metadata…",
     "awaiting-signature": "Confirm in your wallet…",
     confirming: "Waiting for the transaction to confirm…",
     done: "Event created.",
@@ -29,6 +30,7 @@ export function CreateEventForm() {
     const {address} = useAccount();
     const chainId = useChainId();
     const {writeContractAsync} = useWriteContract();
+    const {signMessageAsync} = useSignMessage();
 
     const [name, setName] = useState("");
     const [description, setDescription] = useState("");
@@ -61,9 +63,20 @@ export function CreateEventForm() {
         if (!address) return setError("Connect a wallet first.");
         if (!file) return setError("Choose an image for the badge.");
 
+        // A mistyped-but-valid address would create an event nobody can issue badges for,
+        // recoverable only by rotating the signer afterwards. Catch it here instead.
+        if (signer && !isAddress(signer)) {
+            return setError("Event signer is not a valid address.");
+        }
+
+        const uploadCtx = {
+            address,
+            signMessage: (message: string) => signMessageAsync({message}),
+        };
+
         try {
             setStage("uploading-art");
-            const imageUrl = await uploadImage(file);
+            const imageUrl = await uploadImage(file, uploadCtx);
 
             const draft: EventDraft = {
                 name,
@@ -79,7 +92,7 @@ export function CreateEventForm() {
             };
 
             setStage("uploading-metadata");
-            const metadataUri = await uploadMetadata(buildBadgeMetadata(draft));
+            const metadataUri = await uploadMetadata(buildBadgeMetadata(draft), uploadCtx);
 
             setStage("awaiting-signature");
             const config = toEventConfig(draft, metadataUri);
@@ -128,7 +141,7 @@ export function CreateEventForm() {
                     <span>Badge art</span>
                     <input
                         type="file"
-                        accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
+                        accept="image/png,image/jpeg,image/gif,image/webp"
                         onChange={(e) => onFileChange(e.target.files?.[0] ?? null)}
                         required
                     />
