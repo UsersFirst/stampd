@@ -11,6 +11,8 @@ out/
 contracts/out/
 contracts/cache/
 contracts/broadcast/*/dry-run/
+# Local anvil runs are throwaway; real-chain broadcast logs are deployment provenance.
+contracts/broadcast/*/31337/
 
 # cloudflare
 .wrangler/

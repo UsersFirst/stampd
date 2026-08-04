@@ -83,6 +83,20 @@ forge test --root contracts          # 43 tests
 pnpm sync:abi                        # regenerate the shared ABI after a contract change
 ```
 
+## Deploying the contract
+
+```bash
+cp contracts/.env.example contracts/.env   # fill in DEPLOYER_PRIVATE_KEY
+cd contracts && source .env
+
+forge script script/Deploy.s.sol --rpc-url base_sepolia --broadcast --verify
+cd .. && pnpm sync:deployment              # writes the address into packages/shared
+```
+
+Deployment goes through the deterministic CREATE2 factory with `salt = keccak256("stampd.v1")`, and the constructor takes no arguments — so the contract lands at **the same address on Base Sepolia and Base mainnet**. One address in the docs, the front-end, and every QR code, whichever chain an event lives on. Re-running the script against a chain that already has it is a no-op rather than a second deployment.
+
+The deployer key has no ongoing role. It does not own the contract, cannot mint, and cannot touch anyone's event — every event carries its own signer, and event creation is permissionless. It only needs enough ETH to cover the deployment itself.
+
 `packages/shared` is consumed straight from TypeScript source with no build step, so a contract change flows through `pnpm sync:abi` into both apps immediately.
 
 ## Measured gas
