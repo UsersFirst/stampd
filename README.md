@@ -24,10 +24,20 @@ by Base Paymaster
 | Layer | Stack |
 | --- | --- |
 | Contracts | Solidity + Foundry, ERC-1155, EIP-712 vouchers, Base Sepolia → Base mainnet |
-| Claim app | Next.js, wagmi/viem, OnchainKit + Coinbase Smart Wallet, Base Paymaster for gasless mints |
+| Claim app | Static SPA (Vite + React), wagmi/viem, OnchainKit + Coinbase Smart Wallet |
 | API / control plane | Cloudflare Workers, D1 (SQLite), Durable Objects for rotating QR windows, Workers Secrets for the signer key |
-| Dashboard | Next.js on Cloudflare Pages |
+| Dashboard | Static SPA, same build pipeline as the claim app |
 | Assets | R2 for uploads, IPFS (pinned) for final immutable metadata |
+
+## Hosting
+
+Everything lives at **stampd.usersfirst.com**, on a single origin:
+
+- The static apps are built by GitHub Actions and served from **GitHub Pages**. Pages is static-only, which is why the front-ends are SPAs rather than server-rendered Next.js.
+- DNS sits on Cloudflare. The `stampd` record is **proxied** (orange cloud) to the Pages origin, with SSL in Full mode and GitHub's custom-domain verification in place.
+- A **Worker route on `stampd.usersfirst.com/api/*`** intercepts API traffic ahead of Pages.
+
+Because the API and the site share an origin, there is no CORS configuration and no preflight round-trip on the claim path — which matters when a room full of people all scan at once.
 
 ## Repository layout
 
@@ -39,6 +49,26 @@ apps/dashboard/     Organizer console: create event, upload art, generate codes,
 packages/shared/    ABIs, generated types, EIP-712 domain/type definitions shared by all apps
 docs/               Design notes, threat model, migration notes
 ```
+
+## Measured gas
+
+L2 execution gas from `contracts/test/GasBench.t.sol` (`forge test --match-contract GasBenchTest -vv`):
+
+| Operation | Gas |
+| --- | --- |
+| `createEvent` | 110,947 |
+| `mintBatch`, 1 recipient | 54,311 |
+| `mintBatch`, 10 recipients | 51,608 per badge |
+| `mintBatch`, 200 recipients | 51,338 per badge |
+| `claim` (single voucher) | 84,676 |
+
+Batching converges to ~51.3k per badge almost immediately — the 21k base transaction cost is the only thing being amortised, because each badge still pays two cold `SSTORE`s (the `claimed` flag and the ERC-1155 balance) that no amount of batching removes. Against `claim`'s 84.7k that is roughly a 1.65× saving on execution gas.
+
+The larger saving is outside this table: the `claim` path in production also carries ERC-4337 bundler and EntryPoint overhead, and a first-time attendee pays to deploy their smart wallet. `mintBatch` delivers to counterfactual addresses and skips both.
+
+**These numbers exclude Base's L1 data-availability cost**, which scales with calldata (32 bytes per recipient) and is a meaningful share of the real bill. Confirm against an actual Base Sepolia transaction before quoting an organizer a per-badge price.
+
+If per-badge cost ever needs to come down further, the available lever is replacing the `claimed` address mapping with a bitmap keyed by a Worker-assigned attendee index — 256 attendees per slot instead of one, worth roughly 20k per badge, at the cost of a more complex claim path.
 
 ## Roadmap
 
