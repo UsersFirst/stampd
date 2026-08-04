@@ -1,7 +1,6 @@
 import {UPLOAD_HEADERS, buildUploadAuthMessage, sha256Hex, type Address} from "@stampd/shared";
+import {apiUrl} from "./api";
 
-/// Uploads go to the Worker on the same origin (/api/*), so there is no CORS preflight.
-///
 /// Each upload is authorized by a wallet signature over the SHA-256 of the body. Binding
 /// the signature to the content is what lets the Worker stay stateless: a captured
 /// signature can only re-upload the identical bytes, which is a no-op against
@@ -24,7 +23,7 @@ async function post(body: ArrayBuffer, contentType: string, filename: string, ct
     const issuedAt = Math.floor(Date.now() / 1000);
     const signature = await ctx.signMessage(buildUploadAuthMessage({address: ctx.address, sha256: digest, issuedAt}));
 
-    const res = await fetch("/api/upload", {
+    const res = await fetch(apiUrl("/api/upload"), {
         method: "POST",
         headers: {
             "content-type": contentType,

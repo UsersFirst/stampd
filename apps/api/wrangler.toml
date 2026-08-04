@@ -2,15 +2,15 @@ name = "stampd-api"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
 
-# The Worker sits in front of the GitHub Pages origin on the same hostname, so the static
-# apps and the API share an origin and the claim path pays no CORS preflight.
-# Requires the stampd DNS record to be proxied through Cloudflare (orange cloud).
-[[routes]]
-pattern = "stampd.usersfirst.com/api/*"
-zone_name = "usersfirst.com"
+# Published to <name>.<account>.workers.dev. A route on stampd.usersfirst.com/api/* would
+# be nicer — same origin, no CORS — but Worker routes only fire for zones Cloudflare hosts,
+# and usersfirst.com DNS is at name.com. Revisit if that zone ever moves. See issue #1.
+workers_dev = true
 
 [vars]
-PUBLIC_ORIGIN = "https://stampd.usersfirst.com"
+# Browser origins permitted to call this API. The dashboard is served from GitHub Pages on
+# stampd.usersfirst.com; the Vite dev server is on 5173.
+ALLOWED_ORIGINS = "https://stampd.usersfirst.com"
 # Chain consulted when an upload is signed by a smart-contract wallet (ERC-1271/6492).
 # Plain EOA signatures never reach the RPC.
 VERIFY_CHAIN_ID = "84532"
@@ -22,7 +22,7 @@ bucket_name = "stampd-assets"
 preview_bucket_name = "stampd-assets-preview"
 
 [env.dev.vars]
-PUBLIC_ORIGIN = "http://127.0.0.1:8787"
+ALLOWED_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
 VERIFY_CHAIN_ID = "84532"
 RPC_URL = "https://sepolia.base.org"
 

@@ -47,13 +47,17 @@ Both paths share the `claimed` map, so they cannot double-badge one address.
 
 ## Hosting
 
-Everything lives at **stampd.usersfirst.com**, on a single origin:
+- The static apps are built by GitHub Actions and served from **GitHub Pages** at **stampd.usersfirst.com**. Pages is static-only, which is why the front-ends are SPAs rather than server-rendered Next.js.
+- DNS for `usersfirst.com` is at **name.com**, not Cloudflare.
+- The Worker API is deployed to **`*.workers.dev`** and is therefore **cross-origin** to the site. It speaks CORS with an origin allowlist; preflights are cached for a day, so the cost is one extra round trip per browser session.
 
-- The static apps are built by GitHub Actions and served from **GitHub Pages**. Pages is static-only, which is why the front-ends are SPAs rather than server-rendered Next.js.
-- DNS sits on Cloudflare. The `stampd` record is **proxied** (orange cloud) to the Pages origin, with SSL in Full mode and GitHub's custom-domain verification in place.
-- A **Worker route on `stampd.usersfirst.com/api/*`** intercepts API traffic ahead of Pages.
+The dashboard needs `VITE_API_BASE_URL` set to the Worker origin at build time — a repository variable of that name, consumed by `.github/workflows/pages.yml`. Without it a production build fails loudly on the first API call rather than silently 404ing against Pages.
 
-Because the API and the site share an origin, there is no CORS configuration and no preflight round-trip on the claim path — which matters when a room full of people all scan at once.
+### Why not a same-origin `/api/*` route
+
+A Worker route on `stampd.usersfirst.com/api/*` would remove CORS entirely, and would also allow real security headers (`frame-ancestors`, HSTS), which GitHub Pages cannot set at all. But Worker routes only fire for zones Cloudflare hosts, so it would require migrating `usersfirst.com` DNS off name.com — affecting every service on that domain, not just stampd. Deferred rather than decided; tracked in issue #1.
+
+Note that D1 and R2 need no DNS arrangement of any kind. Only custom-hostname routing does.
 
 ## Repository layout
 
@@ -76,7 +80,7 @@ pnpm --filter @stampd/api dev        # Worker + R2 on :8787
 pnpm dev                             # dashboard on :5173, proxying /api to the Worker
 ```
 
-The dev server proxies `/api/*` to the local Worker so the same-origin assumption holds in development exactly as it does in production.
+The dev server proxies `/api/*` to the local Worker, so `VITE_API_BASE_URL` can stay unset locally. The dev Worker's origin allowlist covers `localhost:5173`.
 
 ```bash
 forge test --root contracts          # 43 tests
