@@ -68,8 +68,12 @@ body {
 
 .brand {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 0.5rem;
+}
+.brand-logo {
+    display: block;
+    height: auto;
 }
 .brand-mark {
     font-weight: 650;
@@ -151,6 +155,12 @@ body {
 .card.empty {
     text-align: center;
     padding: 3rem 1.5rem;
+}
+.hero-logo {
+    display: block;
+    margin: 0 auto 1.5rem;
+    max-width: 100%;
+    height: auto;
 }
 
 .form {

@@ -1,5 +1,6 @@
 import {useAccount, useConnect, useDisconnect, useChainId, useSwitchChain} from "wagmi";
 import {CHAIN_IDS, isSupportedChain} from "@stampd/shared";
+import {Logo} from "./Logo";
 
 function truncate(address: string): string {
     return `${address.slice(0, 6)}…${address.slice(-4)}`;
@@ -15,6 +16,7 @@ export function WalletBar() {
     return (
         <header className="wallet-bar">
             <div className="brand">
+                <Logo variant="mark" width={30} className="brand-logo" />
                 <span className="brand-mark">stampd</span>
                 <span className="brand-sub">organizer</span>
             </div>

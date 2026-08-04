@@ -1,4 +1,5 @@
 import {useAccount} from "wagmi";
+import {Logo} from "./components/Logo";
 import {WalletBar} from "./components/WalletBar";
 import {CreateEventForm} from "./components/CreateEventForm";
 import {MyEvents} from "./components/MyEvents";
@@ -18,7 +19,7 @@ export function App() {
                     </>
                 ) : (
                     <section className="card empty">
-                        <h1>Proof you were there.</h1>
+                        <Logo variant="lockup" width={200} className="hero-logo" />
                         <p className="muted">
                             Connect the wallet you want to organize from. It will own your events and can rotate
                             their signing keys.
