@@ -59,7 +59,11 @@ def write_pgm(path, rows, w, h, box, want_blue):
 
 def trace(pgm, svg):
     pbm = pgm.with_suffix(".pbm")
-    subprocess.run(["mkbitmap", "-f", "4", "-s", "2", "-t", "0.45", "-o", str(pbm), str(pgm)], check=True)
+    # `-n` disables high-pass filtering. Filtering exists to flatten background gradients,
+    # and there are none here — the input is a clean alpha channel. With `-f 4` it instead
+    # carved pinholes into the densest areas, which are exactly the stroke junctions: the
+    # t's crossbar, and where the bowls of a, p and d meet their stems.
+    subprocess.run(["mkbitmap", "-n", "-s", "2", "-t", "0.45", "-o", str(pbm), str(pgm)], check=True)
     subprocess.run(["potrace", "-s", "-a", "1.2", "-O", "0.3", "-t", "4", "-o", str(svg), str(pbm)], check=True)
 
 
