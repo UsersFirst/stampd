@@ -36,3 +36,8 @@ pnpm-debug.log*
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# logo trace intermediates
+.logo-build/
+__pycache__/
+*.pyc

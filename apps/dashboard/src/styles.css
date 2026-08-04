@@ -8,6 +8,7 @@
     --accent-text: #ffffff;
     --warn: #8a5a00;
     --error: #a12a1c;
+    --logo-check: #3f72c4;
     color-scheme: light;
 }
 
@@ -22,6 +23,7 @@
         --accent-text: #1b1a17;
         --warn: #d7a54a;
         --error: #e0796a;
+        --logo-check: #96b4e6;
         color-scheme: dark;
     }
 }
