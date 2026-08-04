@@ -6,24 +6,40 @@ POAP is shutting down. This is not an attempt to rebuild all of it. It is the on
 
 ## Design in one paragraph
 
-The contract is deliberately dumb: a single ERC-1155 collection on Base where `tokenId == eventId`, badges are soulbound by default, and a mint is only accepted when accompanied by an EIP-712 voucher signed by the event's authorized signer. All of the policy — who may claim, how many, during what window, whether this QR code has already been burned — lives off-chain in a Cloudflare Worker backed by D1. That split means the badges survive independently of us, while the anti-farming controls stay flexible and cheap to change.
+The contract is deliberately dumb: a single ERC-1155 collection on Base where `tokenId == eventId`, and badges are soulbound by default. Every event carries its own signer address, and that one address authorizes both ways a badge can be issued. All of the policy — who may claim, how many, during what window, whether this QR code has already been burned — lives off-chain in a Cloudflare Worker backed by D1. That split means the badges survive independently of us, while the anti-farming controls stay flexible and cheap to change.
+
+**The host pays.** Gas comes from a per-event float the organizer funds, not from a platform budget. That is not just a billing preference: it means a farmer who drains a float is draining the organizer's own money against the organizer's own codes, which is a support conversation rather than an incident.
 
 ## Architecture
 
+The default path is host-funded and batched. The attendee never pays gas, never deploys a wallet, and never waits on a bundler:
+
 ```
-Attendee phone                Cloudflare (control plane)          Base (settlement)
-─────────────                 ──────────────────────────          ─────────────────
-scan QR ───────────────────▶  Worker validates code in D1
-                              marks it redeemed
-                              signs EIP-712 voucher ───────────▶  Stampd1155.claim()
-Coinbase Smart Wallet ◀────── voucher returned                    verifies signature
-mints, gas sponsored                                              mints soulbound badge
-by Base Paymaster
+Attendee phone              Cloudflare (control plane)        Base (settlement)
+──────────────              ──────────────────────────        ─────────────────
+scan QR ─────────────────▶  Worker validates code in D1
+sign message (free) ─────▶  burns the code, queues the
+                            address in a Durable Object
+"claimed ✓" ◀────────────── flush every ~30s or N claims
+                            per-event key submits ────────▶   Stampd1155.mintBatch()
+                            (organizer-funded gas)            onlyEventSigner
+                                                              mints soulbound badges
 ```
+
+Attendees are minted to *counterfactual* smart-wallet addresses — addresses that exist but have never been deployed. An ERC-1155 mint to an address with no code skips the receiver hook, so the wallet-deployment cost moves to whenever the attendee first uses that wallet elsewhere, which may be never on the organizer's dime.
+
+The self-serve path still exists for events that want instant on-chain finality and will fund a paymaster. There the attendee (or a bundler) submits an EIP-712 voucher signed by the same per-event key, and `claim()` verifies it on-chain with ERC-1271 support:
+
+```
+attendee ──▶ Worker signs voucher ──▶ Stampd1155.claim(voucher, sig) ──▶ badge
+             (paymaster sponsors the userop)
+```
+
+Both paths share the `claimed` map, so they cannot double-badge one address.
 
 | Layer | Stack |
 | --- | --- |
-| Contracts | Solidity + Foundry, ERC-1155, EIP-712 vouchers, Base Sepolia → Base mainnet |
+| Contracts | Solidity + Foundry, ERC-1155, per-event signer, Base Sepolia → Base mainnet |
 | Claim app | Static SPA (Vite + React), wagmi/viem, OnchainKit + Coinbase Smart Wallet |
 | API / control plane | Cloudflare Workers, D1 (SQLite), Durable Objects for rotating QR windows, Workers Secrets for the signer key |
 | Dashboard | Static SPA, same build pipeline as the claim app |
@@ -49,6 +65,25 @@ apps/dashboard/     Organizer console: create event, upload art, generate codes,
 packages/shared/    ABIs, generated types, EIP-712 domain/type definitions shared by all apps
 docs/               Design notes, threat model, migration notes
 ```
+
+## Running locally
+
+Requires Node 20.19+ or 22.12+ and pnpm 9. Foundry for the contracts.
+
+```bash
+pnpm install
+pnpm --filter @stampd/api dev        # Worker + R2 on :8787
+pnpm dev                             # dashboard on :5173, proxying /api to the Worker
+```
+
+The dev server proxies `/api/*` to the local Worker so the same-origin assumption holds in development exactly as it does in production.
+
+```bash
+forge test --root contracts          # 43 tests
+pnpm sync:abi                        # regenerate the shared ABI after a contract change
+```
+
+`packages/shared` is consumed straight from TypeScript source with no build step, so a contract change flows through `pnpm sync:abi` into both apps immediately.
 
 ## Measured gas
 

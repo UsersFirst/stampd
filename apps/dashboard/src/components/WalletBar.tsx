@@ -1,0 +1,52 @@
+import {useAccount, useConnect, useDisconnect, useChainId, useSwitchChain} from "wagmi";
+import {CHAIN_IDS, isSupportedChain} from "@stampd/shared";
+
+function truncate(address: string): string {
+    return `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
+
+export function WalletBar() {
+    const {address, isConnected} = useAccount();
+    const {connect, connectors, isPending} = useConnect();
+    const {disconnect} = useDisconnect();
+    const chainId = useChainId();
+    const {switchChain} = useSwitchChain();
+
+    return (
+        <header className="wallet-bar">
+            <div className="brand">
+                <span className="brand-mark">stampd</span>
+                <span className="brand-sub">organizer</span>
+            </div>
+
+            <div className="wallet-actions">
+                {isConnected && !isSupportedChain(chainId) && (
+                    <button className="btn btn-warn" onClick={() => switchChain({chainId: CHAIN_IDS.baseSepolia})}>
+                        Switch to Base Sepolia
+                    </button>
+                )}
+
+                {isConnected ? (
+                    <>
+                        <span className="chip">{chainId === CHAIN_IDS.base ? "Base" : "Base Sepolia"}</span>
+                        <span className="chip mono">{address ? truncate(address) : ""}</span>
+                        <button className="btn btn-ghost" onClick={() => disconnect()}>
+                            Disconnect
+                        </button>
+                    </>
+                ) : (
+                    connectors.map((connector) => (
+                        <button
+                            key={connector.uid}
+                            className="btn"
+                            disabled={isPending}
+                            onClick={() => connect({connector})}
+                        >
+                            {connector.name}
+                        </button>
+                    ))
+                )}
+            </div>
+        </header>
+    );
+}

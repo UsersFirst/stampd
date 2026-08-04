@@ -1,0 +1,25 @@
+name = "stampd-api"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+
+# The Worker sits in front of the GitHub Pages origin on the same hostname, so the static
+# apps and the API share an origin and the claim path pays no CORS preflight.
+# Requires the stampd DNS record to be proxied through Cloudflare (orange cloud).
+[[routes]]
+pattern = "stampd.usersfirst.com/api/*"
+zone_name = "usersfirst.com"
+
+[vars]
+PUBLIC_ORIGIN = "https://stampd.usersfirst.com"
+
+[[r2_buckets]]
+binding = "ASSETS_BUCKET"
+bucket_name = "stampd-assets"
+preview_bucket_name = "stampd-assets-preview"
+
+[env.dev.vars]
+PUBLIC_ORIGIN = "http://127.0.0.1:8787"
+
+[[env.dev.r2_buckets]]
+binding = "ASSETS_BUCKET"
+bucket_name = "stampd-assets-dev"

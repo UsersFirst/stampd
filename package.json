@@ -1,0 +1,13 @@
+{
+  "name": "stampd",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "sync:abi": "node scripts/sync-abi.mjs",
+    "dev": "pnpm --filter @stampd/dashboard dev",
+    "build": "pnpm --filter @stampd/dashboard build",
+    "typecheck": "pnpm -r typecheck",
+    "test:contracts": "forge test --root contracts"
+  }
+}

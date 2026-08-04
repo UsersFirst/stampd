@@ -1,0 +1,267 @@
+:root {
+    --bg: #fbfaf8;
+    --surface: #ffffff;
+    --border: #e4e0d8;
+    --text: #1c1b19;
+    --muted: #6d6a64;
+    --accent: #b4551f;
+    --accent-text: #ffffff;
+    --warn: #8a5a00;
+    --error: #a12a1c;
+    color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #161513;
+        --surface: #1f1e1b;
+        --border: #34322d;
+        --text: #f0ede7;
+        --muted: #9c988f;
+        --accent: #e07a45;
+        --accent-text: #1b1a17;
+        --warn: #d7a54a;
+        --error: #e0796a;
+        color-scheme: dark;
+    }
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.small {
+    font-size: 0.85rem;
+}
+.muted {
+    color: var(--muted);
+}
+
+.shell {
+    max-width: 780px;
+    margin: 0 auto;
+    padding: 1.5rem 1.25rem 4rem;
+}
+
+/* Wallet bar ------------------------------------------------------------- */
+
+.wallet-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 2rem;
+}
+
+.brand {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+}
+.brand-mark {
+    font-weight: 650;
+    font-size: 1.25rem;
+    letter-spacing: -0.02em;
+}
+.brand-sub {
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+.wallet-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.chip {
+    padding: 0.3rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+
+/* Buttons ---------------------------------------------------------------- */
+
+.btn {
+    padding: 0.5rem 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+.btn:hover:not(:disabled) {
+    border-color: var(--accent);
+}
+.btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+.btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-text);
+    font-weight: 550;
+    align-self: flex-start;
+    padding: 0.6rem 1.2rem;
+}
+.btn-ghost {
+    background: transparent;
+}
+.btn-warn {
+    border-color: var(--warn);
+    color: var(--warn);
+}
+
+/* Cards and forms -------------------------------------------------------- */
+
+.card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+.card h1,
+.card h2 {
+    margin: 0 0 0.4rem;
+    letter-spacing: -0.02em;
+}
+.card h2 {
+    font-size: 1.15rem;
+}
+.card.empty {
+    text-align: center;
+    padding: 3rem 1.5rem;
+}
+
+.form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.1rem;
+    margin-top: 1.25rem;
+}
+
+label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+label > span {
+    font-weight: 550;
+    font-size: 0.9rem;
+}
+
+input,
+textarea {
+    padding: 0.55rem 0.7rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.95rem;
+    width: 100%;
+}
+input:focus,
+textarea:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+}
+textarea {
+    resize: vertical;
+}
+input[type="file"] {
+    padding: 0.45rem;
+}
+input[type="checkbox"] {
+    width: auto;
+    margin-top: 0.2rem;
+}
+
+.row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem;
+}
+
+.checkbox {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 0.6rem;
+}
+.checkbox > span {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    font-weight: 550;
+    font-size: 0.9rem;
+}
+
+.preview {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+.preview img {
+    width: 96px;
+    height: 96px;
+    object-fit: cover;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+}
+
+.status {
+    color: var(--muted);
+    margin: 0;
+}
+.error {
+    color: var(--error);
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+/* Events table ----------------------------------------------------------- */
+
+.events {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 1rem;
+    font-size: 0.9rem;
+}
+.events th,
+.events td {
+    text-align: left;
+    padding: 0.55rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+}
+.events th {
+    color: var(--muted);
+    font-weight: 550;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+footer {
+    text-align: center;
+    padding-top: 1rem;
+}
