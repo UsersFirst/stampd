@@ -49,7 +49,7 @@ Both paths share the `claimed` map, so they cannot double-badge one address.
 
 - The static apps are built by GitHub Actions and served from **GitHub Pages** at **stampd.usersfirst.com**. Pages is static-only, which is why the front-ends are SPAs rather than server-rendered Next.js.
 - DNS for `usersfirst.com` is at **name.com**, not Cloudflare.
-- The Worker API is deployed to **`*.workers.dev`** and is therefore **cross-origin** to the site. It speaks CORS with an origin allowlist; preflights are cached for a day, so the cost is one extra round trip per browser session.
+- The Worker API is deployed to **`*.workers.dev`** — currently **https://stampd-api.pete-872.workers.dev** — and is therefore **cross-origin** to the site. It speaks CORS with an origin allowlist; preflights are cached for a day, so the cost is one extra round trip per browser session.
 
 The dashboard needs `VITE_API_BASE_URL` set to the Worker origin at build time — a repository variable of that name, consumed by `.github/workflows/pages.yml`. Without it a production build fails loudly on the first API call rather than silently 404ing against Pages.
 
@@ -58,6 +58,26 @@ The dashboard needs `VITE_API_BASE_URL` set to the Worker origin at build time �
 A Worker route on `stampd.usersfirst.com/api/*` would remove CORS entirely, and would also allow real security headers (`frame-ancestors`, HSTS), which GitHub Pages cannot set at all. But Worker routes only fire for zones Cloudflare hosts, so it would require migrating `usersfirst.com` DNS off name.com — affecting every service on that domain, not just stampd. Deferred rather than decided; tracked in issue #1.
 
 Note that D1 and R2 need no DNS arrangement of any kind. Only custom-hostname routing does.
+
+### Cloudflare resources
+
+| Kind | Name | Role |
+| --- | --- | --- |
+| R2 | `stampd-nfts` | Badge art and metadata, production |
+| R2 | `stampd-nfts-preview` | `wrangler dev --remote` against the default env |
+| R2 | `stampd-nfts-dev` | `env.dev`, so local uploads never land in the production bucket |
+| D1 | `stampd` | Claim codes, claims, event drafts |
+| D1 | `stampd-dev` | Same schema, for `--env dev` |
+
+Database ids are in `apps/api/wrangler.toml`. They are account-scoped identifiers rather than
+secrets, which is why they are committed instead of injected.
+
+Provisioning these from a clean account needs two things that are easy to miss. **R2 must be
+enabled once from the dashboard** before any token can create a bucket — until then the API
+answers `code: 10042` no matter how the token is scoped. And the API token needs *Workers
+Scripts:Edit*, *D1:Edit*, *Workers R2 Storage:Edit*, and *Account Settings:Read*; a token
+missing the D1 scope fails with a bare `Authentication error [code: 10000]` that does not say
+which permission is absent.
 
 ## Repository layout
 
@@ -76,11 +96,20 @@ Requires Node 20.19+ or 22.12+ and pnpm 9. Foundry for the contracts.
 
 ```bash
 pnpm install
-pnpm --filter @stampd/api dev        # Worker + R2 on :8787
+pnpm --filter @stampd/api dev        # Worker + R2 + D1 on :8787
 pnpm dev                             # dashboard on :5173, proxying /api to the Worker
 ```
 
 The dev server proxies `/api/*` to the local Worker, so `VITE_API_BASE_URL` can stay unset locally. The dev Worker's origin allowlist covers `localhost:5173`.
+
+`wrangler dev` runs D1 against a local SQLite file, so the schema has to be applied there once before anything reads it:
+
+```bash
+pnpm --filter @stampd/api db:migrate:local   # local SQLite, no Cloudflare account needed
+pnpm --filter @stampd/api db:migrate         # the real stampd database
+```
+
+`GET /api/health` queries both bindings and returns 503 with a per-dependency breakdown, so a missing binding or an unapplied migration shows up there rather than on an organizer's first claim.
 
 ```bash
 forge test --root contracts          # 43 tests
@@ -96,6 +125,10 @@ cd contracts && source .env
 forge script script/Deploy.s.sol --rpc-url base_sepolia --broadcast --verify
 cd .. && pnpm sync:deployment              # writes the address into packages/shared
 ```
+
+`--verify` reads `ETHERSCAN_API_KEY`. One Etherscan V2 key covers Base and Base Sepolia both;
+there is no separate Basescan key to obtain. Verification often fails its first attempt with
+`Could not detect ContractCode` — that is the indexer lagging the block, and forge retries.
 
 Deployment goes through the deterministic CREATE2 factory with `salt = keccak256("stampd.v1")`, and the constructor takes no arguments — so the contract lands at **the same address on Base Sepolia and Base mainnet**. One address in the docs, the front-end, and every QR code, whichever chain an event lives on. Re-running the script against a chain that already has it is a no-op rather than a second deployment.
 
@@ -129,7 +162,7 @@ If per-badge cost ever needs to come down further, the available lever is replac
 
 **Phase 2 — Claim app.** QR → `/claim/<code>` → Coinbase Smart Wallet onboarding (passkey, no seed phrase) → voucher fetch → sponsored mint. The attendee should never see the word "gas."
 
-**Phase 3 — Cloudflare control plane.** D1 schema for `organizers`, `events`, `claim_codes`, `claims`, `rate_limits`. Worker endpoints for code validation and voucher signing. Two code modes: one-time static codes for remote distribution, and rotating short-lived codes (Durable Object, ~30s window) for the in-person "QR on a projector" case.
+**Phase 3 — Cloudflare control plane.** D1 schema for `organizers`, `events`, `claim_codes`, `claims`, `rate_limits` — *landed, in `apps/api/migrations/`; the endpoints on top of it are not*. Worker endpoints for code validation and voucher signing. Two code modes: one-time static codes for remote distribution, and rotating short-lived codes (Durable Object, ~30s window) for the in-person "QR on a projector" case.
 
 **Phase 4 — Organizer dashboard.** Create an event, upload art, set supply and date window, generate N codes, live rotating-QR display mode, CSV export of claimers.
 
@@ -145,4 +178,13 @@ If per-badge cost ever needs to come down further, the available lever is replac
 
 ## Status
 
-Pre-alpha. Nothing is deployed yet.
+Pre-alpha, but no longer nothing.
+
+| What | Where |
+| --- | --- |
+| `Stampd1155` | [`0x7420a39DC8eAaa366169090f2473C0C379a59E35`](https://sepolia.basescan.org/address/0x7420a39dc8eaaa366169090f2473c0c379a59e35) on Base Sepolia, verified |
+| Worker API | https://stampd-api.pete-872.workers.dev |
+
+The contract holds no events yet, and the Worker serves uploads and health only — claim codes
+and voucher signing are still Phase 3. Base mainnet is untouched; the CREATE2 salt reserves the
+same address there whenever it is wanted.

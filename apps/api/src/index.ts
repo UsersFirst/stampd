@@ -20,6 +20,8 @@ import {
 
 export interface Env {
     ASSETS_BUCKET: R2Bucket;
+    /// Claim codes, claims, and event drafts. Schema in migrations/.
+    DB: D1Database;
     /// Comma-separated origins permitted to call this API from a browser.
     ALLOWED_ORIGINS: string;
     /// Chain whose state is consulted to verify smart-contract-wallet signatures.
@@ -66,6 +68,10 @@ function json(body: unknown, status = 200): Response {
     });
 }
 
+/// Returns only the preflight-specific headers. `access-control-allow-origin` and `Vary`
+/// come from `withCors`, which every response goes through — including this one. A preflight
+/// answered without an allow-origin header is a failed preflight, so keeping the two in one
+/// place is what stops them drifting apart.
 function handlePreflight(request: Request, env: Env): Response {
     if (!allowedOrigin(request, env)) return new Response(null, {status: 403});
     return new Response(null, {
@@ -179,10 +185,40 @@ async function handleAsset(key: string, env: Env): Promise<Response> {
     return new Response(object.body, {headers});
 }
 
+/// Reports each dependency separately. A 503 here means the Worker is up but cannot serve
+/// claims, which is a different page for whoever is on call than a 500 from the edge.
+async function handleHealth(env: Env): Promise<Response> {
+    const checks: Record<string, string> = {};
+
+    // Reads the schema rather than `SELECT 1`, so a database that exists but has never been
+    // migrated reports unhealthy instead of passing.
+    try {
+        await env.DB.prepare("SELECT 1 FROM claim_codes LIMIT 1").all();
+        checks.d1 = "ok";
+    } catch (error) {
+        checks.d1 = `error: ${error instanceof Error ? error.message : String(error)}`;
+    }
+
+    // A HEAD on a key that is not expected to exist. Returns null on a healthy empty bucket
+    // and throws only when the binding or the bucket itself is wrong.
+    try {
+        await env.ASSETS_BUCKET.head("healthcheck");
+        checks.r2 = "ok";
+    } catch (error) {
+        checks.r2 = `error: ${error instanceof Error ? error.message : String(error)}`;
+    }
+
+    const ok = Object.values(checks).every((v) => v === "ok");
+    return json({ok, checks}, ok ? 200 : 503);
+}
+
 async function route(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
-    if (url.pathname === "/api/health") return json({ok: true});
+    // Touches both bindings rather than returning a bare literal: a missing binding, an
+    // unapplied migration, or a bucket that was never created is exactly the class of
+    // mistake a health check should catch, and all three are invisible until first use.
+    if (url.pathname === "/api/health") return handleHealth(env);
 
     if (url.pathname === "/api/upload") {
         if (request.method !== "POST") return json({error: "Method not allowed"}, 405);
@@ -201,7 +237,7 @@ async function route(request: Request, env: Env): Promise<Response> {
 
 export default {
     async fetch(request: Request, env: Env): Promise<Response> {
-        if (request.method === "OPTIONS") return handlePreflight(request, env);
+        if (request.method === "OPTIONS") return withCors(handlePreflight(request, env), request, env);
         return withCors(await route(request, env), request, env);
     },
 } satisfies ExportedHandler<Env>;

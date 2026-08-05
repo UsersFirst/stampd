@@ -18,8 +18,19 @@ RPC_URL = "https://sepolia.base.org"
 
 [[r2_buckets]]
 binding = "ASSETS_BUCKET"
-bucket_name = "stampd-assets"
-preview_bucket_name = "stampd-assets-preview"
+bucket_name = "stampd-nfts"
+preview_bucket_name = "stampd-nfts-preview"
+
+# Claim codes, claims, and event drafts. Schema in migrations/; apply with
+# `pnpm --filter @stampd/api db:migrate`.
+#
+# database_id is written by `wrangler d1 create stampd` — it is an account-scoped
+# identifier, not a secret, which is why it is committed rather than kept in a var.
+[[d1_databases]]
+binding = "DB"
+database_name = "stampd"
+database_id = "6438832e-d7d6-47c2-969c-1caa8a851214"
+migrations_dir = "migrations"
 
 [env.dev.vars]
 ALLOWED_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
@@ -28,4 +39,12 @@ RPC_URL = "https://sepolia.base.org"
 
 [[env.dev.r2_buckets]]
 binding = "ASSETS_BUCKET"
-bucket_name = "stampd-assets-dev"
+bucket_name = "stampd-nfts-dev"
+
+# `wrangler dev` runs D1 against a local SQLite file and ignores database_id, but the field
+# is still required for the config to parse. The id matters only for `--remote`.
+[[env.dev.d1_databases]]
+binding = "DB"
+database_name = "stampd-dev"
+database_id = "5a7d818d-28c8-43d0-a423-f8fa781835c4"
+migrations_dir = "migrations"
