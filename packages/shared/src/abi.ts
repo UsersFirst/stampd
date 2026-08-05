@@ -626,7 +626,7 @@ export const stampd1155Abi = [
   },
   {
     "type": "function",
-    "name": "totalSupply",
+    "name": "totalMinted",
     "inputs": [
       {
         "name": "eventId",
@@ -1224,6 +1224,17 @@ export const stampd1155Abi = [
   {
     "type": "error",
     "name": "SupplyExhausted",
+    "inputs": [
+      {
+        "name": "eventId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TransferabilityLocked",
     "inputs": [
       {
         "name": "eventId",

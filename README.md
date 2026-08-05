@@ -182,7 +182,7 @@ Pre-alpha, but no longer nothing.
 
 | What | Where |
 | --- | --- |
-| `Stampd1155` | [`0x7420a39DC8eAaa366169090f2473C0C379a59E35`](https://sepolia.basescan.org/address/0x7420a39dc8eaaa366169090f2473c0c379a59e35) on Base Sepolia, verified |
+| `Stampd1155` | [`0x347eCF1ba316bB31fFbc20d4ce370B9a0D841043`](https://sepolia.basescan.org/address/0x347ecf1ba316bb31ffbc20d4ce370b9a0d841043) on Base Sepolia, verified |
 | Worker API | https://stampd-api.pete-872.workers.dev |
 
 The contract holds no events yet, and the Worker serves uploads and health only — claim codes

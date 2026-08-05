@@ -118,6 +118,7 @@ contract Stampd1155 is ERC1155, EIP712, ReentrancyGuardTransient {
     error NotOrganizer(uint256 eventId);
     error NotEventSigner(uint256 eventId);
     error MetadataFrozen(uint256 eventId);
+    error TransferabilityLocked(uint256 eventId);
     error ClaimWindowClosed(uint256 eventId);
     error SupplyExhausted(uint256 eventId);
     error AlreadyClaimed(uint256 eventId, address holder);
@@ -201,8 +202,15 @@ contract Stampd1155 is ERC1155, EIP712, ReentrancyGuardTransient {
         emit EventURIUpdated(eventId, newURI);
     }
 
+    /// @notice Set whether an event's badges may be transferred. Only while no badge exists.
+    /// @dev Locked at first mint. Flipping a live event back to soulbound would freeze an asset
+    ///      someone already holds, and flipping it the other way would put badges people earned
+    ///      as keepsakes onto a market they never opted into. Either way the holder's terms would
+    ///      change after the fact, so the window closes as soon as there is a holder: whatever an
+    ///      attendee is shown at claim time is what they keep.
     function setTransferable(uint256 eventId, bool transferable) external onlyOrganizer(eventId) {
         if (_events[eventId].frozen) revert MetadataFrozen(eventId);
+        if (_events[eventId].minted != 0) revert TransferabilityLocked(eventId);
         _events[eventId].transferable = transferable;
         emit TransferabilitySet(eventId, transferable);
     }
@@ -305,7 +313,15 @@ contract Stampd1155 is ERC1155, EIP712, ReentrancyGuardTransient {
         return _requireEventView(eventId);
     }
 
-    function totalSupply(uint256 eventId) external view returns (uint256) {
+    /// @notice Badges ever issued for an event. Monotonic: burning does not decrement it.
+    /// @dev Deliberately *not* named `totalSupply`. Every ERC-1155 convention, OpenZeppelin's
+    ///      `ERC1155Supply` included, reads `totalSupply` as current circulating supply, and an
+    ///      indexer or marketplace assuming that would misreport any collection with burns.
+    ///      The monotonic count is the one this contract needs — it is what `claimed` is checked
+    ///      against, and what stops burn-and-reclaim farming — so the counter is right and the
+    ///      conventional name is wrong. If circulating supply is ever wanted, add a second
+    ///      counter rather than repurposing this one.
+    function totalMinted(uint256 eventId) external view returns (uint256) {
         return _requireEventView(eventId).minted;
     }
 

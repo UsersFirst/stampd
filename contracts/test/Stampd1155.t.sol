@@ -133,7 +133,7 @@ contract Stampd1155Test is Test {
         assertEq(stampd.balanceOf(alice, id), 1);
         assertEq(stampd.balanceOf(bob, id), 1);
         assertEq(stampd.balanceOf(carol, id), 1);
-        assertEq(stampd.totalSupply(id), 3);
+        assertEq(stampd.totalMinted(id), 3);
         assertTrue(stampd.claimed(id, alice));
     }
 
@@ -168,7 +168,7 @@ contract Stampd1155Test is Test {
         assertEq(minted, 2, "duplicate skipped, others minted");
         assertEq(stampd.balanceOf(alice, id), 1, "no double mint");
         assertEq(stampd.balanceOf(bob, id), 1);
-        assertEq(stampd.totalSupply(id), 2);
+        assertEq(stampd.totalMinted(id), 2);
     }
 
     function test_mintBatch_skipsZeroAddress() public {
@@ -202,7 +202,7 @@ contract Stampd1155Test is Test {
         uint256 minted = stampd.mintBatch(id, to);
 
         assertEq(minted, 2);
-        assertEq(stampd.totalSupply(id), 2);
+        assertEq(stampd.totalMinted(id), 2);
         assertEq(stampd.balanceOf(carol, id), 0);
         assertEq(stampd.remainingSupply(id), 0);
     }
@@ -240,7 +240,7 @@ contract Stampd1155Test is Test {
         stampd.claim(v, _sign(signerPk, v));
 
         assertEq(stampd.balanceOf(alice, id), 1);
-        assertEq(stampd.totalSupply(id), 1);
+        assertEq(stampd.totalMinted(id), 1);
         assertTrue(stampd.nonceUsed(id, 1));
     }
 
@@ -493,6 +493,55 @@ contract Stampd1155Test is Test {
         vm.stopPrank();
     }
 
+    function test_setTransferable_allowedBeforeFirstMint() public {
+        uint256 id = _createDefaultEvent();
+
+        vm.prank(organizer);
+        stampd.setTransferable(id, true);
+        assertTrue(stampd.getEvent(id).transferable);
+
+        // Still nobody holding one, so the organizer may still change their mind.
+        vm.prank(organizer);
+        stampd.setTransferable(id, false);
+        assertFalse(stampd.getEvent(id).transferable);
+    }
+
+    /// @dev The whole point of the lock: an attendee's terms cannot change after they hold a badge.
+    function test_setTransferable_lockedOnceAnyBadgeExists() public {
+        Stampd1155.EventConfig memory cfg = _defaultConfig();
+        cfg.transferable = true;
+        uint256 id = _createEvent(cfg);
+
+        vm.prank(signer);
+        stampd.mintBatch(id, _one(alice));
+
+        vm.prank(organizer);
+        vm.expectRevert(abi.encodeWithSelector(Stampd1155.TransferabilityLocked.selector, id));
+        stampd.setTransferable(id, false);
+
+        // Alice keeps the badge she was promised: still transferable.
+        vm.prank(alice);
+        stampd.safeTransferFrom(alice, bob, id, 1, "");
+        assertEq(stampd.balanceOf(bob, id), 1);
+    }
+
+    /// @dev Burning back to zero supply must not reopen the window — `minted` is monotonic, so a
+    ///      holder cannot be talked into burning as a way to unlock the flag.
+    function test_setTransferable_staysLockedAfterBurn() public {
+        uint256 id = _createDefaultEvent();
+
+        vm.prank(signer);
+        stampd.mintBatch(id, _one(alice));
+
+        vm.prank(alice);
+        stampd.burn(id);
+        assertEq(stampd.balanceOf(alice, id), 0);
+
+        vm.prank(organizer);
+        vm.expectRevert(abi.encodeWithSelector(Stampd1155.TransferabilityLocked.selector, id));
+        stampd.setTransferable(id, true);
+    }
+
     /// @dev Freezing locks metadata but must not stop attendees from being badged.
     function test_freezeEvent_stillAllowsMinting() public {
         uint256 id = _createDefaultEvent();
@@ -572,7 +621,7 @@ contract Stampd1155Test is Test {
         vm.expectRevert(); // ReentrancyGuardTransient bubbles up through the receiver hook
         stampd.mintBatch(id, to);
 
-        assertEq(stampd.totalSupply(id), 0, "batch reverted wholesale, no state committed");
+        assertEq(stampd.totalMinted(id), 0, "batch reverted wholesale, no state committed");
     }
 
     /* ------------------------------------------------------------------ */
@@ -596,7 +645,7 @@ contract Stampd1155Test is Test {
 
         assertLe(minted, cap, "never mints past the cap");
         assertEq(minted, recipientCount < cap ? recipientCount : cap);
-        assertEq(stampd.totalSupply(id), minted);
+        assertEq(stampd.totalMinted(id), minted);
     }
 
     function testFuzz_soulboundBlocksEveryTransfer(address from, address to) public {
