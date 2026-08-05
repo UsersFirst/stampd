@@ -3,6 +3,7 @@ import {Logo} from "./components/Logo";
 import {WalletBar} from "./components/WalletBar";
 import {CreateEventForm} from "./components/CreateEventForm";
 import {MyEvents} from "./components/MyEvents";
+import {ScanAndMint} from "./components/ScanAndMint";
 
 export function App() {
     const {isConnected} = useAccount();
@@ -14,6 +15,9 @@ export function App() {
             <main>
                 {isConnected ? (
                     <>
+                        {/* Badging comes first: creating an event happens once, at a desk, while
+                            issuing badges happens repeatedly and on a phone at the door. */}
+                        <ScanAndMint />
                         <CreateEventForm />
                         <MyEvents />
                     </>

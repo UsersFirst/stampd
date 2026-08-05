@@ -1,17 +1,5 @@
-import {useAccount, useChainId, useReadContract, useReadContracts} from "wagmi";
-import {stampd1155Abi, stampdAddress} from "@stampd/shared";
-
-interface EventRow {
-    id: bigint;
-    organizer: string;
-    signer: string;
-    startsAt: bigint;
-    endsAt: bigint;
-    maxSupply: number;
-    minted: number;
-    transferable: boolean;
-    frozen: boolean;
-}
+import {useAccount} from "wagmi";
+import {useEvents} from "../hooks/useEvents";
 
 function formatWindow(startsAt: bigint, endsAt: bigint): string {
     const open = startsAt === 0n ? "now" : new Date(Number(startsAt) * 1000).toLocaleString();
@@ -21,54 +9,21 @@ function formatWindow(startsAt: bigint, endsAt: bigint): string {
 
 export function MyEvents() {
     const {address} = useAccount();
-    const chainId = useChainId();
-
-    let contractAddress: `0x${string}` | null = null;
-    try {
-        contractAddress = stampdAddress(chainId);
-    } catch {
-        contractAddress = null;
-    }
-
-    const {data: eventCount} = useReadContract({
-        abi: stampd1155Abi,
-        address: contractAddress ?? undefined,
-        functionName: "eventCount",
-        query: {enabled: Boolean(contractAddress)},
-    });
-
-    const ids = eventCount ? Array.from({length: Number(eventCount)}, (_, i) => BigInt(i + 1)) : [];
-
-    const {data: events} = useReadContracts({
-        contracts: ids.map((id) => ({
-            abi: stampd1155Abi,
-            address: contractAddress ?? undefined,
-            functionName: "getEvent" as const,
-            args: [id] as const,
-        })),
-        query: {enabled: ids.length > 0},
-    });
+    const {contractAddress, events} = useEvents();
 
     if (!contractAddress) {
         return (
             <section className="card">
                 <h2>Your events</h2>
                 <p className="muted">
-                    Stampd1155 is not deployed on this chain yet. Deploy it, then add the address to
-                    <code> packages/shared/src/chains.ts</code>.
+                    Stampd1155 is not deployed on this chain yet. Deploy it, then run
+                    <code> pnpm sync:deployment</code>.
                 </p>
             </section>
         );
     }
 
-    const mine: EventRow[] = (events ?? [])
-        .map((result, index) => {
-            if (result.status !== "success") return null;
-            const ev = result.result as unknown as EventRow;
-            return {...ev, id: ids[index]};
-        })
-        .filter((row): row is EventRow => row !== null)
-        .filter((row) => address && row.organizer.toLowerCase() === address.toLowerCase());
+    const mine = events.filter((row) => address && row.organizer.toLowerCase() === address.toLowerCase());
 
     return (
         <section className="card">
@@ -80,7 +35,7 @@ export function MyEvents() {
                     <thead>
                         <tr>
                             <th>#</th>
-                            <th>Claimed</th>
+                            <th>Issued</th>
                             <th>Window</th>
                             <th>Bound</th>
                             <th>Metadata</th>

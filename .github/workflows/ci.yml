@@ -44,6 +44,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Typecheck every package
         run: pnpm -r typecheck
+      - name: Test every package that has tests
+        run: pnpm -r --if-present test
       - name: Build dashboard
         run: pnpm --filter @stampd/dashboard build
 
