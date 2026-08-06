@@ -145,16 +145,6 @@ export function CreateEventForm() {
                 </label>
 
                 <label>
-                    <span>Description</span>
-                    <textarea
-                        value={description}
-                        onChange={(e) => setDescription(e.target.value)}
-                        rows={3}
-                        maxLength={500}
-                    />
-                </label>
-
-                <label>
                     <span>Badge art</span>
                     <input
                         type="file"
@@ -171,59 +161,84 @@ export function CreateEventForm() {
                     </div>
                 )}
 
-                <div className="row">
+                {/* A native <details> rather than state: it is keyboard accessible and
+                    findable by in-page search for free, and every field inside has a working
+                    default, so an organizer who never opens it still gets a valid event. */}
+                <details className="advanced">
+                    <summary>Advanced</summary>
+
                     <label>
-                        <span>Max badges</span>
-                        <input
-                            type="number"
-                            min={0}
-                            value={maxSupply}
-                            onChange={(e) => setMaxSupply(e.target.value)}
+                        <span>Description</span>
+                        <textarea
+                            value={description}
+                            onChange={(e) => setDescription(e.target.value)}
+                            rows={3}
+                            maxLength={500}
                         />
-                        <small className="muted">0 means unlimited.</small>
                     </label>
+
+                    <div className="row">
+                        <label>
+                            <span>Max badges</span>
+                            <input
+                                type="number"
+                                min={0}
+                                value={maxSupply}
+                                onChange={(e) => setMaxSupply(e.target.value)}
+                            />
+                            <small className="muted">0 means unlimited.</small>
+                        </label>
+
+                        <label>
+                            <span>Claim opens</span>
+                            <input
+                                type="datetime-local"
+                                value={startsAt}
+                                onChange={(e) => setStartsAt(e.target.value)}
+                            />
+                            <small className="muted">Blank means immediately.</small>
+                        </label>
+
+                        <label>
+                            <span>Claim closes</span>
+                            <input
+                                type="datetime-local"
+                                value={endsAt}
+                                onChange={(e) => setEndsAt(e.target.value)}
+                            />
+                            <small className="muted">Blank means never.</small>
+                        </label>
+                    </div>
 
                     <label>
-                        <span>Claim opens</span>
-                        <input type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} />
-                        <small className="muted">Blank means immediately.</small>
-                    </label>
-
-                    <label>
-                        <span>Claim closes</span>
-                        <input type="datetime-local" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} />
-                        <small className="muted">Blank means never.</small>
-                    </label>
-                </div>
-
-                <label>
-                    <span>Event signer</span>
-                    <input
-                        className="mono"
-                        placeholder={address ?? "0x…"}
-                        value={signer}
-                        onChange={(e) => setSigner(e.target.value)}
-                    />
-                    <small className="muted">
-                        The key allowed to issue badges for this event. Defaults to your wallet; you can rotate it
-                        later if it is ever compromised.
-                    </small>
-                </label>
-
-                <label className="checkbox">
-                    <input
-                        type="checkbox"
-                        checked={transferable}
-                        onChange={(e) => setTransferable(e.target.checked)}
-                    />
-                    <span>
-                        Allow attendees to transfer badges
+                        <span>Event signer</span>
+                        <input
+                            className="mono"
+                            placeholder={address ?? "0x…"}
+                            value={signer}
+                            onChange={(e) => setSigner(e.target.value)}
+                        />
                         <small className="muted">
-                            Off by default. Turning this on lets badges be sold, which is how POAP's proof stopped
-                            meaning anything.
+                            The key allowed to issue badges for this event. Defaults to your wallet; you can rotate
+                            it later if it is ever compromised.
                         </small>
-                    </span>
-                </label>
+                    </label>
+
+                    <label className="checkbox">
+                        <input
+                            type="checkbox"
+                            checked={transferable}
+                            onChange={(e) => setTransferable(e.target.checked)}
+                        />
+                        <span>
+                            Allow attendees to transfer badges
+                            <small className="muted">
+                                Off by default. Turning this on lets badges be sold, which is how POAP's proof
+                                stopped meaning anything.
+                            </small>
+                        </span>
+                    </label>
+                </details>
 
                 <button className="btn btn-primary" type="submit" disabled={busy || !address}>
                     {busy ? "Working…" : stage === "done" ? "Create another event" : "Create event"}

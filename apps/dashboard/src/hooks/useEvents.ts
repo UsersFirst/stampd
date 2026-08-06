@@ -49,7 +49,10 @@ export function useEvents(): UseEventsResult {
         })
         .filter((row): row is EventRow => row !== null);
 
-    return {contractAddress, events, isLoading: countLoading || eventsLoading};
+    // Guarded on `ids.length` deliberately: with no events the second query never runs, and
+    // leaning on a disabled query to report "not loading" would risk a permanent spinner on a
+    // fresh contract.
+    return {contractAddress, events, isLoading: countLoading || (ids.length > 0 && eventsLoading)};
 }
 
 /// Events the given wallet may actually issue badges for.

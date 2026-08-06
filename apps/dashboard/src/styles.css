@@ -273,6 +273,57 @@ input[type="checkbox"] {
     letter-spacing: 0.04em;
 }
 
+.tabs {
+    display: flex;
+    gap: 0.25rem;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+}
+.tab {
+    appearance: none;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    padding: 0.6rem 0.9rem;
+    font: inherit;
+    font-weight: 550;
+    color: var(--muted);
+    cursor: pointer;
+    /* Comfortably tappable on a phone without hunting. */
+    min-height: 44px;
+}
+.tab:hover {
+    color: var(--text);
+}
+.tab.active {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+}
+
+.advanced {
+    border-top: 1px solid var(--border);
+    padding-top: 0.75rem;
+}
+.advanced > summary {
+    cursor: pointer;
+    color: var(--muted);
+    font-weight: 550;
+    font-size: 0.9rem;
+    padding: 0.35rem 0;
+    min-height: 32px;
+    /* Keep the native disclosure triangle; a custom one is one more thing to get wrong. */
+}
+.advanced > summary:hover {
+    color: var(--text);
+}
+/* The form is a flex column, and <details> is not — its children need the same spacing. */
+.advanced[open] {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
 /* Scanner. Sized generously because this is used one-handed, on a phone, at a door. */
 .scanner {
     position: relative;
