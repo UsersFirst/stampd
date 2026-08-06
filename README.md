@@ -55,6 +55,30 @@ Both paths share the `claimed` map, so they cannot double-badge one address.
 
 The dashboard needs `VITE_API_BASE_URL` set to the Worker origin at build time — a repository variable of that name, consumed by `.github/workflows/pages.yml`. Without it a production build fails loudly on the first API call rather than silently 404ing against Pages.
 
+### When a Pages deploy will not publish
+
+`actions/deploy-pages` waits ten minutes for GitHub to process a deployment and then aborts,
+so each failed attempt costs ten minutes of wall clock and it is tempting to keep re-running.
+Two things make that worse rather than better.
+
+**A timed-out deployment stays `in_progress` and blocks the next one.** The following run fails
+with `Deployment request failed … due to in progress deployment. Please cancel <sha> first`, so
+retrying queues behind something that will never finish.
+
+**The deployment id *is* the commit sha.** Cancelling to clear the blockage therefore marks that
+commit as cancelled for good: re-running its workflow afterwards fails immediately with
+`Deployment cancelled` rather than timing out. That commit can never publish.
+
+So the recovery is a **new commit**, not a re-run. Check for a blocking deployment first:
+
+```bash
+gh api "repos/UsersFirst/stampd/deployments?environment=github-pages&per_page=5"
+gh api repos/UsersFirst/stampd/deployments/<id>/statuses   # newest state first
+```
+
+The build half is unaffected throughout — the artifact uploads fine, and the live site keeps
+serving the previous build, so this is a publication stall rather than an outage.
+
 ### Why not a same-origin `/api/*` route
 
 A Worker route on `stampd.usersfirst.com/api/*` would remove CORS entirely, and would also allow real security headers (`frame-ancestors`, HSTS), which GitHub Pages cannot set at all. But Worker routes only fire for zones Cloudflare hosts, so it would require migrating `usersfirst.com` DNS off name.com — affecting every service on that domain, not just stampd. Deferred rather than decided; tracked in issue #1.
