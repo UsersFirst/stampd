@@ -4,6 +4,7 @@ import {useQueryClient} from "@tanstack/react-query";
 import {parseEventLogs} from "viem";
 import {stampd1155Abi, type Address} from "@stampd/shared";
 import {useSignableEvents} from "../hooks/useEvents";
+import {useEventNames} from "../hooks/useEventNames";
 import {useQrScanner} from "../hooks/useQrScanner";
 import {parseWalletAddress, shortAddress} from "../lib/qr";
 import {mergeRecipients} from "../lib/batch";
@@ -52,6 +53,7 @@ export function ScanAndMint() {
     const queryClient = useQueryClient();
 
     const {contractAddress, events} = useSignableEvents(address);
+    const eventNames = useEventNames(useMemo(() => events.map((e) => e.id), [events]));
 
     const [eventId, setEventId] = useState<bigint | null>(null);
     const [entry, setEntry] = useState("");
@@ -258,7 +260,15 @@ export function ScanAndMint() {
                 >
                     {events.map((e) => (
                         <option key={e.id.toString()} value={e.id.toString()}>
-                            #{e.id.toString()} — {e.minted} issued
+                            {/* Name first: it is what an organizer running two events at once
+                                actually distinguishes them by. The id stays because it is what
+                                appears on-chain and in an explorer, and falls back to carrying
+                                the label alone when the metadata cannot be read. */}
+                            {eventNames[e.id.toString()]
+                                ? `${eventNames[e.id.toString()]} · #${e.id}`
+                                : `Event #${e.id}`}
+                            {" — "}
+                            {e.minted} issued
                             {e.maxSupply > 0 ? ` of ${e.maxSupply}` : ""}
                         </option>
                     ))}
