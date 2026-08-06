@@ -4,7 +4,19 @@ import {useEventLog} from "../hooks/useEventLog";
 import {apiUrl} from "../lib/api";
 import {shortAddress} from "../lib/qr";
 
-const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
+/// Shared with the Tandemonium dashboard — one OAuth client with several authorized origins,
+/// which is why the id looks nothing like stampd.
+///
+/// Inline rather than a build-time variable, matching how Tandemonium's dashboard does it. A
+/// client id is not a secret: it is embedded in every page that uses it, and it ends up in this
+/// bundle either way. Keeping it in the source means a mismatch with the Worker's
+/// GOOGLE_CLIENT_ID shows up in a diff instead of hiding in repository settings — which is not
+/// hypothetical, since setting the variable alone silently did nothing until the Pages workflow
+/// was taught to pass it through.
+///
+/// Must match `GOOGLE_CLIENT_ID` in apps/api/wrangler.toml. The Worker checks a token's audience
+/// against its own copy, so a drift here fails every operator request.
+const CLIENT_ID = "640682648249-dp1dou0mmpkm6m697oakbe9odabt1dui.apps.googleusercontent.com";
 
 interface QueueRow {
     sha256: string;
