@@ -175,9 +175,9 @@ stored in R2, and screened by SafeSearch. This is the working product.
 **Next — operator dashboard** (issue #4). Google-authenticated read-only view across all
 events, plus the human review queue for images screening could not score.
 
-**Next — organizer throughput.** Bulk entry for pre-registered attendee lists, and whatever
-else keeps a door moving. The organizer path is the product now, so this is where the effort
-goes.
+**Deferred — organizer throughput** (issue #8). Bulk entry for pre-registered lists, fewer taps
+per walk-in. Deferred because it answers a bottleneck nobody has hit yet: the right time to
+build it is after an event has shown where the door actually slows down, not before.
 
 **Deferred — attendee-driven claiming** (issues #2 and #3). QR codes, claim app, passkey
 onboarding, voucher signing, per-event signer custody. Deliberately not next, because the
