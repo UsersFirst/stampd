@@ -1,4 +1,4 @@
-export type Tab = "create" | "scan" | "all";
+export type Tab = "create" | "scan" | "all" | "operator";
 
 /// Which tab to actually render, given what the organizer last picked and whether they have
 /// anything to scan against.

@@ -441,3 +441,15 @@ footer {
     text-align: center;
     padding-top: 1rem;
 }
+
+/* Review rows carry a thumbnail, detail and two actions; on a phone the actions wrap under
+   rather than squeezing the image. */
+.review-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+.review-row .event-body {
+    flex: 1 1 12rem;
+}

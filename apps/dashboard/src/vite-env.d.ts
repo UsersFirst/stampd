@@ -9,3 +9,14 @@ interface ImportMetaEnv {
 interface ImportMeta {
     readonly env: ImportMetaEnv;
 }
+
+interface ImportMetaEnv {
+    readonly VITE_API_BASE_URL?: string;
+    /// Google OAuth client id for the operator sign-in. Absent means the Operator tab explains
+    /// that it is unconfigured rather than rendering a sign-in button that cannot work.
+    readonly VITE_GOOGLE_CLIENT_ID?: string;
+}
+
+interface ImportMeta {
+    readonly env: ImportMetaEnv;
+}

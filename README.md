@@ -208,6 +208,44 @@ The contract holds no events yet, and the Worker serves uploads and health only 
 and voucher signing are still Phase 3. Base mainnet is untouched; the CREATE2 salt reserves the
 same address there whenever it is wanted.
 
+## Operator dashboard
+
+An **Operator** tab, behind Google Sign-In, for reviewing images that automated screening could
+not settle and seeing every event on the contract.
+
+Same shape as the Tandemonium dashboard: Google Identity Services hands the browser an ID
+token, and the Worker verifies it as an RS256 JWT against Google's published keys — checking
+issuer, audience, expiry and `email_verified` — rather than trusting anything the client
+decoded for itself. `alg` is pinned to RS256, so a token cannot talk the verifier into a weaker
+algorithm.
+
+One deliberate difference from Tandemonium: there is no exchange for a server-issued JWT.
+Tandemonium needs one because it has a users table, profiles and a second auth provider to
+normalise. This has an email allowlist and nothing else, so the Google token *is* the session —
+no signing secret to hold, no session store, at the cost of the browser re-acquiring a token
+roughly hourly, which Google does silently for an already-signed-in user.
+
+```bash
+# Worker
+wrangler secret put GOOGLE_CLIENT_ID   --config apps/api/wrangler.toml
+wrangler secret put OPERATOR_EMAILS    --config apps/api/wrangler.toml   # comma-separated
+
+# Dashboard, at build time
+gh variable set VITE_GOOGLE_CLIENT_ID --body "<the same client id>"
+```
+
+The Google OAuth client needs **https://stampd.usersfirst.com** as an authorized JavaScript
+origin, and `http://localhost:5173` as well for local work.
+
+Until both Worker values are set, `/api/admin/*` answers **404** rather than 401 — an
+unconfigured deployment should not advertise endpoints it cannot authorize. An authenticated
+account that is not on the allowlist gets 403, worded so that it does not confirm the sign-in
+itself succeeded.
+
+What this protects is the moderation queue. It does **not** meaningfully protect event data:
+that is on a public blockchain and anyone can read it directly, so the Operator tab presents it
+conveniently rather than privately.
+
 ## Image screening
 
 Badge art is screened by **Google Cloud Vision SafeSearch**.

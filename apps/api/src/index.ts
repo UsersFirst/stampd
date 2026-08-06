@@ -10,6 +10,7 @@
 
 import {createPublicClient, http, recoverMessageAddress, isAddress} from "viem";
 import {classifyImage, describeScore, thresholdsFrom, type SafeSearchScores} from "./moderation";
+import {requireOperator} from "./auth";
 import {base, baseSepolia} from "viem/chains";
 import {
     UPLOAD_AUTH_WINDOW_SECONDS,
@@ -36,6 +37,11 @@ export interface Env {
     MODERATION_THRESHOLD_ADULT?: string;
     MODERATION_THRESHOLD_RACY?: string;
     MODERATION_THRESHOLD_VIOLENCE?: string;
+    /// Google OAuth client id the operator dashboard signs in against. Absent means operator
+    /// access is unconfigured and its endpoints answer 404.
+    GOOGLE_CLIENT_ID?: string;
+    /// Comma-separated emails permitted to act as operators.
+    OPERATOR_EMAILS?: string;
 }
 
 /// Chains a signature may be produced on. Anything else is rejected rather than guessed at:
@@ -99,7 +105,12 @@ function handlePreflight(request: Request, env: Env): Response {
         status: 204,
         headers: {
             "access-control-allow-methods": "GET, HEAD, POST, OPTIONS",
-            "access-control-allow-headers": ["content-type", ...Object.values(UPLOAD_HEADERS)].join(", "),
+            // `authorization` carries the operator's Google token on /api/admin/* routes.
+            "access-control-allow-headers": [
+                "content-type",
+                "authorization",
+                ...Object.values(UPLOAD_HEADERS),
+            ].join(", "),
             "access-control-max-age": "86400",
         },
     });
@@ -593,6 +604,79 @@ async function handleHealth(env: Env): Promise<Response> {
     return json({ok, checks, moderation, unscreened}, ok ? 200 : 503);
 }
 
+/// Operator-only routes. Everything here is behind a verified Google identity on an allowlist;
+/// the CORS origin list is not access control, since it only constrains browsers and these are
+/// reachable by anything that can make a request.
+async function routeOperator(request: Request, env: Env, url: URL): Promise<Response> {
+    const auth = await requireOperator(request, env);
+    if (!auth.ok) return json({error: auth.error}, auth.status);
+
+    // The unscreened queue, plus enough history to tell a quota problem from a broken image.
+    if (url.pathname === "/api/admin/moderation" && request.method === "GET") {
+        const queue = await env.DB.prepare(
+            `SELECT sha256, object_key, attempts, last_error, submitted_by, checked_at,
+                    attempts >= ${MAX_MODERATION_ATTEMPTS} AS awaiting_review
+             FROM image_moderation
+             WHERE verdict = 'pending'
+             ORDER BY awaiting_review DESC, checked_at ASC
+             LIMIT 100`,
+        ).all();
+
+        const recent = await env.DB.prepare(
+            `SELECT sha256, outcome, source, attempt, reasons, error, reviewed_by, created_at
+             FROM moderation_events ORDER BY created_at DESC, id DESC LIMIT 50`,
+        ).all();
+
+        return json({
+            operator: auth.operator.email,
+            screening: env.GOOGLE_VISION_API_KEY ? "active" : "disabled",
+            queue: queue.results ?? [],
+            recent: recent.results ?? [],
+        });
+    }
+
+    // A human verdict on an image the sweep could not settle.
+    if (url.pathname.startsWith("/api/admin/moderation/") && request.method === "POST") {
+        const sha256 = url.pathname.slice("/api/admin/moderation/".length);
+        if (!/^[a-f0-9]{64}$/.test(sha256)) return json({error: "Bad image id"}, 400);
+
+        const body = (await request.json().catch(() => ({}))) as {verdict?: string};
+        if (body.verdict !== "allow" && body.verdict !== "reject") {
+            return json({error: "verdict must be 'allow' or 'reject'"}, 400);
+        }
+
+        const row = await env.DB.prepare("SELECT object_key FROM image_moderation WHERE sha256 = ?")
+            .bind(sha256)
+            .first<{object_key: string | null}>();
+        if (!row) return json({error: "Unknown image"}, 404);
+
+        // Delete before recording. A failure between the two leaves the row pending and the
+        // object gone, which is recoverable; the reverse leaves it marked refused and still
+        // served, which is the outcome this whole feature exists to prevent.
+        if (body.verdict === "reject" && row.object_key) {
+            await env.ASSETS_BUCKET.delete(row.object_key);
+        }
+
+        await env.DB.prepare(
+            `UPDATE image_moderation SET verdict = ?, checked_at = strftime('%s','now') WHERE sha256 = ?`,
+        )
+            .bind(body.verdict, sha256)
+            .run();
+
+        await env.DB.prepare(
+            `INSERT INTO moderation_events (sha256, object_key, outcome, source, reviewed_by)
+             VALUES (?, ?, ?, 'review', ?)`,
+        )
+            .bind(sha256, row.object_key, body.verdict, auth.operator.email)
+            .run();
+
+        console.log(`moderation ${body.verdict} via review sha=${sha256} by=${auth.operator.email}`);
+        return json({ok: true, sha256, verdict: body.verdict});
+    }
+
+    return json({error: "Not found"}, 404);
+}
+
 async function route(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
@@ -600,6 +684,8 @@ async function route(request: Request, env: Env): Promise<Response> {
     // unapplied migration, or a bucket that was never created is exactly the class of
     // mistake a health check should catch, and all three are invisible until first use.
     if (url.pathname === "/api/health") return handleHealth(env);
+
+    if (url.pathname.startsWith("/api/admin/")) return routeOperator(request, env, url);
 
     if (url.pathname === "/api/upload") {
         if (request.method !== "POST") return json({error: "Method not allowed"}, 405);

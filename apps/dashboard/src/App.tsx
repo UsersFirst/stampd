@@ -7,6 +7,7 @@ import {CreateEventForm} from "./components/CreateEventForm";
 import {MyEvents} from "./components/MyEvents";
 import {ScanAndMint} from "./components/ScanAndMint";
 import {AllEvents} from "./components/AllEvents";
+import {Operator} from "./components/Operator";
 import {useEvents} from "./hooks/useEvents";
 import {resolveTab, type Tab} from "./lib/tabs";
 
@@ -122,6 +123,21 @@ export function App() {
                                     >
                                         All events
                                     </button>
+                                    {/* Always present rather than hidden behind a secret URL.
+                                        What it protects is enforced by the Worker against a
+                                        verified Google identity, so a visible tab leaks nothing
+                                        — and an operator should not have to remember a path. */}
+                                    <button
+                                        role="tab"
+                                        type="button"
+                                        id="tab-operator"
+                                        aria-selected={tab === "operator"}
+                                        aria-controls="panel-operator"
+                                        className={tab === "operator" ? "tab active" : "tab"}
+                                        onClick={() => setTab("operator")}
+                                    >
+                                        Operator
+                                    </button>
                                 </nav>
 
                                 {tab === "create" ? (
@@ -133,9 +149,13 @@ export function App() {
                                         <ScanAndMint />
                                         <MyEvents />
                                     </div>
-                                ) : (
+                                ) : tab === "all" ? (
                                     <div role="tabpanel" id="panel-all" aria-labelledby="tab-all">
                                         <AllEvents />
+                                    </div>
+                                ) : (
+                                    <div role="tabpanel" id="panel-operator" aria-labelledby="tab-operator">
+                                        <Operator />
                                     </div>
                                 )}
                             </>
