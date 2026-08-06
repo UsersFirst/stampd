@@ -9,6 +9,7 @@
 /// EIP-712 voucher signing alongside it.
 
 import {createPublicClient, http, recoverMessageAddress, isAddress} from "viem";
+import {classifyImage, describeScore, thresholdsFrom} from "./moderation";
 import {base, baseSepolia} from "viem/chains";
 import {
     UPLOAD_AUTH_WINDOW_SECONDS,
@@ -28,6 +29,13 @@ export interface Env {
     /// may legitimately be on either chain, and which one is not ours to choose — see below.
     RPC_URL_BASE_SEPOLIA: string;
     RPC_URL_BASE: string;
+    /// Google Cloud Vision key, set with `wrangler secret put GOOGLE_VISION_API_KEY`. When absent
+    /// moderation is skipped rather than failing every upload, so the Worker can be deployed
+    /// before the key exists — `/api/health` reports which state it is in.
+    GOOGLE_VISION_API_KEY?: string;
+    MODERATION_THRESHOLD_ADULT?: string;
+    MODERATION_THRESHOLD_RACY?: string;
+    MODERATION_THRESHOLD_VIOLENCE?: string;
 }
 
 /// Chains a signature may be produced on. Anything else is rejected rather than guessed at:
@@ -170,6 +178,82 @@ async function checkUploadAuth(request: Request, env: Env, digest: string): Prom
     return json({error: "Invalid signature."}, 401);
 }
 
+/// Screens an image before it is stored. Returns an error Response to refuse the upload, or null
+/// to let it through.
+///
+/// Fails *closed*. If the moderator cannot be reached the upload is refused with a 503 rather than
+/// admitted unscored: an organizer retrying in a minute is a far smaller cost than this domain
+/// serving something illegal into every wallet that renders the badge. The one exception is having
+/// no API key at all, which is a deliberate "not configured yet" rather than a failure.
+async function moderate(
+    bytes: ArrayBuffer,
+    digest: string,
+    submittedBy: string | null,
+    contentType: string,
+    env: Env,
+): Promise<Response | null> {
+    // Metadata JSON has no pixels to look at, and its fields are already bounded by the schema.
+    if (contentType === "application/json") return null;
+
+    // Checked before the key, deliberately. Content-addressed keys make a verdict permanent —
+    // identical bytes are the same image forever — so an image already judged unacceptable stays
+    // refused even if screening is later switched off. It also stops a rejected image being
+    // resubmitted to burn moderation quota.
+    try {
+        const cached = await env.DB.prepare("SELECT verdict FROM image_moderation WHERE sha256 = ?")
+            .bind(digest)
+            .first<{verdict: string}>();
+        if (cached?.verdict === "reject") return json({error: REFUSAL_MESSAGE}, 422);
+        if (cached?.verdict === "allow") return null;
+    } catch {
+        // A cache miss must never be the reason an upload fails; fall through and ask the vendor.
+    }
+
+    if (!env.GOOGLE_VISION_API_KEY) return null;
+
+    let result;
+    try {
+        result = await classifyImage(bytes, env.GOOGLE_VISION_API_KEY, thresholdsFrom(env));
+    } catch {
+        return json({error: "Could not check this image right now. Try again in a moment."}, 503);
+    }
+
+    try {
+        await env.DB.prepare(
+            `INSERT INTO image_moderation (sha256, verdict, adult, racy, violence, medical, spoof, submitted_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(sha256) DO NOTHING`,
+        )
+            .bind(
+                digest,
+                result.verdict,
+                result.scores.adult,
+                result.scores.racy,
+                result.scores.violence,
+                result.scores.medical,
+                result.scores.spoof,
+                submittedBy?.toLowerCase() ?? null,
+            )
+            .run();
+    } catch {
+        // Recording the verdict is bookkeeping. Failing to write it must not change the decision.
+    }
+
+    if (result.verdict === "reject") {
+        console.log(
+            `moderation reject ${digest} adult=${describeScore(result.scores.adult)} ` +
+                `racy=${describeScore(result.scores.racy)} violence=${describeScore(result.scores.violence)}`,
+        );
+        return json({error: REFUSAL_MESSAGE}, 422);
+    }
+
+    return null;
+}
+
+/// Deliberately does not say which category tripped, or how close the others came. That detail
+/// is a tuning guide for anyone probing the threshold, and it is in D1 for us either way.
+const REFUSAL_MESSAGE = "This image was refused by automated content screening. Please use different badge art.";
+
 async function handleUpload(request: Request, env: Env): Promise<Response> {
     const contentType = (request.headers.get("content-type") ?? "").split(";")[0].trim();
 
@@ -189,6 +273,11 @@ async function handleUpload(request: Request, env: Env): Promise<Response> {
 
     const rejection = await checkUploadAuth(request, env, digest);
     if (rejection) return rejection;
+
+    // Only after authorization: moderation costs money per call, and an unauthenticated caller
+    // must not be able to spend it.
+    const refusal = await moderate(bytes, digest, request.headers.get(UPLOAD_HEADERS.address), contentType, env);
+    if (refusal) return refusal;
 
     const key = `${digest.slice(0, 32)}.${EXTENSIONS[contentType] ?? "bin"}`;
 
@@ -248,8 +337,13 @@ async function handleHealth(env: Env): Promise<Response> {
         checks.r2 = `error: ${error instanceof Error ? error.message : String(error)}`;
     }
 
+    // Reported but not counted towards health: an unconfigured moderator is a deployment state,
+    // not an outage, and paging someone for it would be wrong. Visible so that "is screening on?"
+    // never has to be answered by reading the deploy logs.
+    const moderation = env.GOOGLE_VISION_API_KEY ? "active" : "disabled (no GOOGLE_VISION_API_KEY)";
+
     const ok = Object.values(checks).every((v) => v === "ok");
-    return json({ok, checks}, ok ? 200 : 503);
+    return json({ok, checks, moderation}, ok ? 200 : 503);
 }
 
 async function route(request: Request, env: Env): Promise<Response> {

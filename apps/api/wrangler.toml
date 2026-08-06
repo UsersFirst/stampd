@@ -18,6 +18,15 @@ ALLOWED_ORIGINS = "https://stampd.usersfirst.com"
 RPC_URL_BASE_SEPOLIA = "https://sepolia.base.org"
 RPC_URL_BASE = "https://mainnet.base.org"
 
+# Content screening thresholds on Google's 5-point SafeSearch scale
+# (1 VERY_UNLIKELY … 5 VERY_LIKELY). An upload is refused at or above these.
+# `racy` sits a notch higher on purpose: it fires on swimwear and close-ups, and a false
+# rejection is silent to the organizer. The API key itself is a secret, not a var:
+#   wrangler secret put GOOGLE_VISION_API_KEY
+MODERATION_THRESHOLD_ADULT = "4"
+MODERATION_THRESHOLD_RACY = "5"
+MODERATION_THRESHOLD_VIOLENCE = "4"
+
 [[r2_buckets]]
 binding = "ASSETS_BUCKET"
 bucket_name = "stampd-nfts"
@@ -38,6 +47,15 @@ migrations_dir = "migrations"
 ALLOWED_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
 RPC_URL_BASE_SEPOLIA = "https://sepolia.base.org"
 RPC_URL_BASE = "https://mainnet.base.org"
+
+# Content screening thresholds on Google's 5-point SafeSearch scale
+# (1 VERY_UNLIKELY … 5 VERY_LIKELY). An upload is refused at or above these.
+# `racy` sits a notch higher on purpose: it fires on swimwear and close-ups, and a false
+# rejection is silent to the organizer. The API key itself is a secret, not a var:
+#   wrangler secret put GOOGLE_VISION_API_KEY
+MODERATION_THRESHOLD_ADULT = "4"
+MODERATION_THRESHOLD_RACY = "5"
+MODERATION_THRESHOLD_VIOLENCE = "4"
 
 [[env.dev.r2_buckets]]
 binding = "ASSETS_BUCKET"

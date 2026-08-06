@@ -190,3 +190,42 @@ Pre-alpha, but no longer nothing.
 The contract holds no events yet, and the Worker serves uploads and health only — claim codes
 and voucher signing are still Phase 3. Base mainnet is untouched; the CREATE2 salt reserves the
 same address there whenever it is wanted.
+
+## Image screening
+
+Badge art is screened by **Google Cloud Vision SafeSearch** before it reaches R2.
+
+The check runs in the Worker rather than the dashboard, because `/api/upload` is a public
+endpoint authorized by a wallet signature — anyone can POST to it with `curl`, so a check in
+the browser would be decoration.
+
+Workers AI was the first choice, since it would have added no vendor. Its catalogue has no
+image moderation model: `resnet-50` classifies ImageNet categories, `llama-guard-3-8b` is
+text-only, and the NSFW filter that does exist applies to prompts going *into* image
+generation rather than to classifying an uploaded image.
+
+```bash
+wrangler secret put GOOGLE_VISION_API_KEY --config apps/api/wrangler.toml
+```
+
+Without that secret, screening is skipped rather than failing every upload, so the Worker can
+be deployed before the key exists. `GET /api/health` reports which state it is in.
+
+Thresholds are `MODERATION_THRESHOLD_ADULT`, `_RACY` and `_VIOLENCE` in `wrangler.toml`, on
+Google's five-point scale (1 `VERY_UNLIKELY` … 5 `VERY_LIKELY`); an upload is refused at or
+above the threshold. `racy` defaults a notch higher than the others because it fires on
+swimwear and close-ups, and a false rejection is silent to the organizer.
+
+Two behaviours worth knowing:
+
+- **It fails closed.** If Vision cannot be reached the upload is refused with a 503, not
+  admitted unscored. An organizer retrying in a minute is cheaper than this domain serving
+  something illegal into every wallet that renders the badge.
+- **Verdicts are cached in D1 forever**, keyed by the image's SHA-256. Object keys are already
+  content-addressed, so identical bytes are the same image and cannot change meaning. The cache
+  is checked *before* the API key, so an image already refused stays refused even if screening
+  is later switched off — and resubmitting a rejected image cannot burn moderation quota.
+
+The refusal message names no category and no score. That detail is a tuning guide for anyone
+probing the threshold; it is recorded in D1 either way, along with the submitting address, so a
+wallet accumulating rejections is visible.
