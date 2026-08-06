@@ -5,6 +5,8 @@ import {ERC1155} from "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {SignatureChecker} from "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import {IERC1155Receiver} from "@openzeppelin/contracts/token/ERC1155/IERC1155Receiver.sol";
 
 /// @title Stampd1155
 /// @notice Soulbound attendance badges on Base. One ERC-1155 collection for every event,
@@ -61,10 +63,12 @@ contract Stampd1155 is ERC1155, EIP712, ReentrancyGuardTransient {
     }
 
     /// @notice Why a recipient in a `mintBatch` call did not receive a badge.
+    /// @dev Appended to, never reordered — indexers store the numeric value.
     enum SkipReason {
         ZeroAddress,
         AlreadyClaimed,
-        SupplyExhausted
+        SupplyExhausted,
+        NotAReceiver
     }
 
     /* ---------------------------------------------------------------------- */
@@ -262,6 +266,11 @@ contract Stampd1155 is ERC1155, EIP712, ReentrancyGuardTransient {
                 emit ClaimSkipped(eventId, to, SkipReason.SupplyExhausted);
                 continue;
             }
+            // Checked last, so recipients skipped for a cheaper reason never pay for the call.
+            if (!_acceptsBadges(to)) {
+                emit ClaimSkipped(eventId, to, SkipReason.NotAReceiver);
+                continue;
+            }
 
             claimed[eventId][to] = true;
             unchecked {
@@ -308,6 +317,28 @@ contract Stampd1155 is ERC1155, EIP712, ReentrancyGuardTransient {
     /* ---------------------------------------------------------------------- */
     /*                                  VIEWS                                  */
     /* ---------------------------------------------------------------------- */
+
+    /// @notice Collection name. ERC-1155 does not require one, but wallets and indexers label a
+    ///         collection with it, and without it a badge shows up as an unidentified token even
+    ///         when its own metadata is perfectly good.
+    function name() external pure returns (string memory) {
+        return "stampd";
+    }
+
+    function symbol() external pure returns (string memory) {
+        return "STAMPD";
+    }
+
+    /// @notice Collection-level metadata: name, description and logo for the whole collection, as
+    ///         distinct from a single badge.
+    /// @dev An https URL rather than ipfs:// on purpose. Both are immutable here — there is no
+    ///      owner and so no setter, by design — but an https pointer leaves the *document* it
+    ///      names editable, so the description and logo can change while the URL cannot. Pinning
+    ///      to IPFS would freeze the contents too. The cost is a dependency on this hostname
+    ///      outliving the contract.
+    function contractURI() external pure returns (string memory) {
+        return "https://stampd.usersfirst.com/collection.json";
+    }
 
     function getEvent(uint256 eventId) external view returns (EventData memory) {
         return _requireEventView(eventId);
@@ -370,6 +401,28 @@ contract Stampd1155 is ERC1155, EIP712, ReentrancyGuardTransient {
             }
         }
         super._update(from, to, ids, values);
+    }
+
+    /// @dev Whether `_mint` will be accepted by `to`, decided *before* minting so a batch is never
+    ///      lost to one recipient.
+    ///
+    ///      `_mint` invokes `onERC1155Received` on any recipient with code, and reverts the entire
+    ///      transaction if it is not implemented. This contract used to assume that recipients
+    ///      with code were rare, because counterfactual smart wallets have none. EIP-7702 ended
+    ///      that: a delegated wallet is 23 bytes of `0xef0100 || implementation`, so an ordinary
+    ///      person's wallet now has code. Without this check, one attendee whose wallet delegates
+    ///      to an implementation lacking the receiver would cost a room of two hundred people
+    ///      their badges, with nothing in the revert to say who caused it.
+    ///
+    ///      A raw staticcall rather than `try/catch`, to bound the gas a hostile recipient can
+    ///      burn. A recipient that answers `true` and then reverts in the hook still takes the
+    ///      batch down; closing that needs an external self-call and is tracked separately.
+    function _acceptsBadges(address to) private view returns (bool) {
+        if (to.code.length == 0) return true;
+
+        (bool ok, bytes memory result) =
+            to.staticcall{gas: 30_000}(abi.encodeCall(IERC165.supportsInterface, (type(IERC1155Receiver).interfaceId)));
+        return ok && result.length == 32 && abi.decode(result, (bool));
     }
 
     function _exists(uint256 eventId) private view returns (bool) {

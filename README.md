@@ -28,6 +28,8 @@ sign message (free) ─────▶  burns the code, queues the
 
 Attendees are minted to *counterfactual* smart-wallet addresses — addresses that exist but have never been deployed. An ERC-1155 mint to an address with no code skips the receiver hook, so the wallet-deployment cost moves to whenever the attendee first uses that wallet elsewhere, which may be never on the organizer's dime.
 
+That optimisation used to double as a safety property, on the assumption that recipients with code were rare. EIP-7702 ended it: a delegated wallet is 23 bytes of `0xef0100 || implementation`, so an ordinary person's wallet now has code, and a recipient whose delegate lacks `IERC1155Receiver` would revert the whole batch. `mintBatch` therefore probes each recipient with code before minting and skips the ones that cannot receive, rather than losing a room's badges to one attendee.
+
 The self-serve path still exists for events that want instant on-chain finality and will fund a paymaster. There the attendee (or a bundler) submits an EIP-712 voucher signed by the same per-event key, and `claim()` verifies it on-chain with ERC-1271 support:
 
 ```
@@ -112,7 +114,7 @@ pnpm --filter @stampd/api db:migrate         # the real stampd database
 `GET /api/health` queries both bindings and returns 503 with a per-dependency breakdown, so a missing binding or an unapplied migration shows up there rather than on an organizer's first claim.
 
 ```bash
-forge test --root contracts          # 43 tests
+forge test --root contracts          # 52 tests
 pnpm sync:abi                        # regenerate the shared ABI after a contract change
 ```
 
@@ -182,7 +184,7 @@ Pre-alpha, but no longer nothing.
 
 | What | Where |
 | --- | --- |
-| `Stampd1155` | [`0x347eCF1ba316bB31fFbc20d4ce370B9a0D841043`](https://sepolia.basescan.org/address/0x347ecf1ba316bb31ffbc20d4ce370b9a0d841043) on Base Sepolia, verified |
+| `Stampd1155` | [`0xfe70f7d29686Aa8423a5D20d0618aFA4929fc88b`](https://sepolia.basescan.org/address/0xfe70f7d29686aa8423a5d20d0618afa4929fc88b) on Base Sepolia, verified |
 | Worker API | https://stampd-api.pete-872.workers.dev |
 
 The contract holds no events yet, and the Worker serves uploads and health only — claim codes

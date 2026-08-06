@@ -184,6 +184,105 @@ contract Stampd1155Test is Test {
         assertEq(stampd.mintBatch(id, to), 1);
     }
 
+    /* ------------------------------------------------------------------ */
+    /*                      RECIPIENTS THAT HAVE CODE                      */
+    /* ------------------------------------------------------------------ */
+
+    /// @dev The failure this guards against: `_mint` calls `onERC1155Received` on any recipient
+    ///      with code and reverts the whole transaction if it is missing. One attendee must never
+    ///      cost a room their badges.
+    function test_mintBatch_skipsRecipientThatCannotReceive() public {
+        uint256 id = _createDefaultEvent();
+        address stranger = address(new NotAReceiver());
+
+        address[] memory to = new address[](3);
+        to[0] = alice;
+        to[1] = stranger;
+        to[2] = bob;
+
+        vm.expectEmit(true, true, false, true);
+        emit Stampd1155.ClaimSkipped(id, stranger, Stampd1155.SkipReason.NotAReceiver);
+
+        vm.prank(signer);
+        uint256 minted = stampd.mintBatch(id, to);
+
+        assertEq(minted, 2, "the batch survived a recipient that cannot receive");
+        assertEq(stampd.balanceOf(alice, id), 1);
+        assertEq(stampd.balanceOf(bob, id), 1);
+        assertEq(stampd.balanceOf(stranger, id), 0);
+        assertFalse(stampd.claimed(id, stranger), "a skipped recipient keeps their claim open");
+    }
+
+    /// @dev The polite refusal, as opposed to no answer at all.
+    function test_mintBatch_skipsRecipientThatDeclines() public {
+        uint256 id = _createDefaultEvent();
+        address decliner = address(new DeclinesBadges());
+
+        address[] memory to = new address[](2);
+        to[0] = decliner;
+        to[1] = alice;
+
+        vm.prank(signer);
+        assertEq(stampd.mintBatch(id, to), 1);
+        assertEq(stampd.balanceOf(alice, id), 1);
+    }
+
+    /// @dev The probe is gas-capped, so a recipient cannot burn the batch's gas to grief everyone
+    ///      else in it.
+    function test_mintBatch_survivesGasBurningRecipient() public {
+        uint256 id = _createDefaultEvent();
+        address burner = address(new GasBurner());
+
+        address[] memory to = new address[](2);
+        to[0] = burner;
+        to[1] = alice;
+
+        vm.prank(signer);
+        uint256 minted = stampd.mintBatch{gas: 1_000_000}(id, to);
+
+        assertEq(minted, 1, "the burner was skipped and alice still got her badge");
+        assertEq(stampd.balanceOf(alice, id), 1);
+    }
+
+    /// @dev The check must not over-skip: a contract that genuinely implements the receiver, such
+    ///      as a deployed smart wallet, still gets its badge.
+    function test_mintBatch_stillMintsToRealReceiver() public {
+        uint256 id = _createDefaultEvent();
+        address wallet = address(new ReentrantReceiver(stampd)); // implements IERC1155Receiver
+
+        vm.prank(signer);
+        assertEq(stampd.mintBatch(id, _one(wallet)), 1);
+        assertEq(stampd.balanceOf(wallet, id), 1);
+    }
+
+    /// @dev An EOA that has been given code, which is what EIP-7702 delegation looks like to this
+    ///      contract. The address is an ordinary wallet to its owner and a contract to `_mint`.
+    function test_mintBatch_skipsDelegatedWalletWithoutReceiver() public {
+        uint256 id = _createDefaultEvent();
+        vm.etch(alice, address(new NotAReceiver()).code);
+
+        address[] memory to = new address[](2);
+        to[0] = alice;
+        to[1] = bob;
+
+        vm.prank(signer);
+        assertEq(stampd.mintBatch(id, to), 1, "bob is unaffected by alice's delegation");
+        assertEq(stampd.balanceOf(bob, id), 1);
+        assertEq(stampd.balanceOf(alice, id), 0);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*                        COLLECTION METADATA                          */
+    /* ------------------------------------------------------------------ */
+
+    /// @dev Not required by ERC-1155, but wallets label a collection with these, and without them
+    ///      a badge shows as an unidentified token however good its own metadata is.
+    function test_collectionMetadata() public view {
+        assertEq(stampd.name(), "stampd");
+        assertEq(stampd.symbol(), "STAMPD");
+        assertEq(stampd.contractURI(), "https://stampd.usersfirst.com/collection.json");
+    }
+
     function test_mintBatch_stopsAtSupplyCap() public {
         Stampd1155.EventConfig memory cfg = _defaultConfig();
         cfg.maxSupply = 2;
@@ -697,5 +796,29 @@ contract ReentrantReceiver is IERC1155Receiver {
 
     function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
         return interfaceId == type(IERC1155Receiver).interfaceId || interfaceId == type(IERC165).interfaceId;
+    }
+}
+
+/// @dev A contract with code that does not implement the receiver at all. Stands in for the real
+///      hazard: an EIP-7702 wallet delegated to an implementation without `IERC1155Receiver`.
+///      Before the pre-check, one of these in a batch reverted the whole thing.
+contract NotAReceiver {
+    uint256 public x;
+}
+
+/// @dev Answers `supportsInterface` with `false` rather than reverting. The other shape the same
+///      problem takes, and the one a naive `try/catch` would still get wrong.
+contract DeclinesBadges {
+    function supportsInterface(bytes4) external pure returns (bool) {
+        return false;
+    }
+}
+
+/// @dev Consumes every unit of gas it is handed and dies. Without the cap on the probe it would
+///      take the whole transaction's gas with it; with the cap it costs the batch 30k and a skip.
+contract GasBurner {
+    function supportsInterface(bytes4) external view returns (bool) {
+        while (gasleft() > 0) {}
+        return true;
     }
 }
