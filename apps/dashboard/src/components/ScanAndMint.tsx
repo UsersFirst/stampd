@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useMemo, useState} from "react";
+import {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import {useAccount, useChainId, usePublicClient, useWriteContract, useWaitForTransactionReceipt} from "wagmi";
 import {useQueryClient} from "@tanstack/react-query";
 import {parseEventLogs} from "viem";
@@ -7,20 +7,25 @@ import {useSignableEvents} from "../hooks/useEvents";
 import {useQrScanner} from "../hooks/useQrScanner";
 import {parseWalletAddress, shortAddress} from "../lib/qr";
 import {mergeRecipients} from "../lib/batch";
+import {looksLikeEnsName, resolveEnsName} from "../lib/ens";
 
 /// Why an address did not become the pending recipient. Each is a different thing to say out loud
 /// to the person standing in front of you, so none of them collapse into "invalid".
-type Rejection = "not-an-address" | "already-queued" | "already-badged";
+type Rejection = "not-an-address" | "already-queued" | "already-badged" | "name-not-found";
 
 const REJECTION_LABEL: Record<Rejection, string> = {
-    "not-an-address": "That QR isn't a wallet address.",
+    "not-an-address": "That isn't a wallet address or a name.",
     "already-queued": "Already added to this batch.",
     "already-badged": "Already has this badge.",
+    "name-not-found": "That name doesn't resolve to an address.",
 };
 
 interface Feedback {
-    kind: "ready" | Rejection;
+    kind: "ready" | "resolving" | Rejection;
     address?: Address;
+    /// The name typed, when the address came from resolving one. Shown alongside so the organizer
+    /// can check what they typed actually pointed where they expected.
+    name?: string;
 }
 
 /// The queue outlives a page reload deliberately. A phone that sleeps mid-event, or a tab the OS
@@ -60,6 +65,9 @@ export function ScanAndMint() {
     const [txHash, setTxHash] = useState<Address | undefined>();
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+    /// Guards against a slow name lookup landing after a later one and overwriting it.
+    const resolutionToken = useRef(0);
+
     const selected = useMemo(() => events.find((e) => e.id === eventId) ?? null, [events, eventId]);
 
     useEffect(() => {
@@ -81,10 +89,10 @@ export function ScanAndMint() {
     /// duplicates via `ClaimSkipped` instead of reverting, so a repeat is harmless on-chain — but
     /// telling the organizer at the door beats telling them in a receipt.
     const consider = useCallback(
-        async (candidate: Address) => {
+        async (candidate: Address, name?: string) => {
             if (queue.some((a) => a.toLowerCase() === candidate.toLowerCase())) {
                 setPending(null);
-                setFeedback({kind: "already-queued", address: candidate});
+                setFeedback({kind: "already-queued", address: candidate, name});
                 return;
             }
 
@@ -98,7 +106,7 @@ export function ScanAndMint() {
                     });
                     if (alreadyBadged) {
                         setPending(null);
-                        setFeedback({kind: "already-badged", address: candidate});
+                        setFeedback({kind: "already-badged", address: candidate, name});
                         return;
                     }
                 } catch {
@@ -108,7 +116,7 @@ export function ScanAndMint() {
             }
 
             setPending(candidate);
-            setFeedback({kind: "ready", address: candidate});
+            setFeedback({kind: "ready", address: candidate, name});
         },
         [queue, publicClient, contractAddress, eventId],
     );
@@ -154,15 +162,36 @@ export function ScanAndMint() {
 
     function onEntryChange(value: string) {
         setEntry(value);
+        // Every keystroke invalidates any lookup still in flight. Without this, a slow resolution
+        // for a half-typed name can land after a later one and overwrite the right answer.
+        const token = ++resolutionToken.current;
+
         const parsed = parseWalletAddress(value);
-        if (!parsed) {
+        if (parsed) {
             setPending(null);
-            // Silent while they are still typing; only a completed, wrong value is worth a message.
-            if (value.trim().length >= 42) setFeedback({kind: "not-an-address"});
-            else setFeedback(null);
+            void consider(parsed);
             return;
         }
-        void consider(parsed);
+
+        if (looksLikeEnsName(value)) {
+            const name = value.trim();
+            setPending(null);
+            setFeedback({kind: "resolving", name});
+            void resolveEnsName(name).then((address) => {
+                if (token !== resolutionToken.current) return; // superseded while resolving
+                if (!address) {
+                    setFeedback({kind: "name-not-found", name});
+                    return;
+                }
+                void consider(address, name);
+            });
+            return;
+        }
+
+        setPending(null);
+        // Silent while they are still typing; only a completed, wrong value is worth a message.
+        if (value.trim().length >= 42) setFeedback({kind: "not-an-address"});
+        else setFeedback(null);
     }
 
     function onAddToQueue() {
@@ -244,13 +273,13 @@ export function ScanAndMint() {
                 </p>
             )}
 
-            <h3 className="step">1 · Scan or paste the attendee's wallet</h3>
+            <h3 className="step">1 · Scan, paste, or type the attendee's wallet</h3>
 
             <label>
-                <span className="sr-only">Attendee wallet address</span>
+                <span className="sr-only">Attendee wallet address or name</span>
                 <input
                     className="mono"
-                    placeholder="0x…"
+                    placeholder="0x… or alice.eth"
                     value={entry}
                     onChange={(e) => onEntryChange(e.target.value)}
                     autoComplete="off"
@@ -280,10 +309,14 @@ export function ScanAndMint() {
             {scanner.error && <p className="error">{scanner.error}</p>}
 
             {feedback && (
-                <p className={feedback.kind === "ready" ? "status" : "error"}>
-                    {feedback.kind === "ready"
-                        ? `Ready to issue to ${shortAddress(feedback.address!)}`
-                        : `${REJECTION_LABEL[feedback.kind]}${feedback.address ? ` (${shortAddress(feedback.address)})` : ""}`}
+                <p className={feedback.kind === "ready" || feedback.kind === "resolving" ? "status" : "error"}>
+                    {feedback.kind === "resolving"
+                        ? `Looking up ${feedback.name}…`
+                        : feedback.kind === "ready"
+                          ? // Both the name and what it resolved to. A name alone hides where the
+                            // badge is actually going, and an address alone loses what was typed.
+                            `Ready to issue to ${feedback.name ? `${feedback.name} — ` : ""}${shortAddress(feedback.address!)}`
+                          : `${REJECTION_LABEL[feedback.kind]}${feedback.address ? ` (${shortAddress(feedback.address)})` : ""}`}
                 </p>
             )}
 
