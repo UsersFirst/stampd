@@ -27,7 +27,20 @@ async function post(body: ArrayBuffer, contentType: string, filename: string, ct
     const signature = await ctx.signMessage(
         buildUploadAuthMessage({address: ctx.address, sha256: digest, issuedAt, chainId: ctx.chainId}),
     );
+    return send(body, contentType, filename, digest, issuedAt, signature, ctx);
+}
 
+/// Everything after the signature. Split out so the prepared path can sign before awaiting
+/// anything, while this half stays shared.
+async function send(
+    body: ArrayBuffer,
+    contentType: string,
+    filename: string,
+    _digest: string,
+    issuedAt: number,
+    signature: `0x${string}`,
+    ctx: UploadContext,
+): Promise<string> {
     const res = await fetch(apiUrl("/api/upload"), {
         method: "POST",
         headers: {
@@ -55,11 +68,41 @@ async function post(body: ArrayBuffer, contentType: string, filename: string, ct
     return url;
 }
 
-export async function uploadImage(file: File, ctx: UploadContext): Promise<string> {
+/// An image read and hashed ahead of time, so that submitting can ask the wallet to sign without
+/// awaiting anything first.
+export interface PreparedUpload {
+    bytes: ArrayBuffer;
+    digest: string;
+    contentType: string;
+    filename: string;
+}
+
+/// Do this when the organizer picks the file, not when they submit.
+///
+/// A wallet that signs in a popup can only open one from the synchronous call stack of a user
+/// gesture — mobile browsers discard the activation the moment you await. Reading and hashing the
+/// file inside the submit handler put two awaits between the tap and `window.open`, so Safari
+/// blocked the first signature every time. Hashing here leaves nothing to await on submit.
+export async function prepareImage(file: File): Promise<PreparedUpload> {
     if (file.size > MAX_IMAGE_BYTES) {
         throw new Error(`Badge art must be under ${MAX_IMAGE_BYTES / 1024 / 1024} MB.`);
     }
-    return post(await file.arrayBuffer(), file.type || "application/octet-stream", file.name, ctx);
+    const bytes = await file.arrayBuffer();
+    return {
+        bytes,
+        digest: await sha256Hex(bytes),
+        contentType: file.type || "application/octet-stream",
+        filename: file.name,
+    };
+}
+
+/// Signs *first*, before any await, so the popup opens while the click is still active.
+export async function uploadPreparedImage(prepared: PreparedUpload, ctx: UploadContext): Promise<string> {
+    const issuedAt = Math.floor(Date.now() / 1000);
+    const signature = await ctx.signMessage(
+        buildUploadAuthMessage({address: ctx.address, sha256: prepared.digest, issuedAt, chainId: ctx.chainId}),
+    );
+    return send(prepared.bytes, prepared.contentType, prepared.filename, prepared.digest, issuedAt, signature, ctx);
 }
 
 export async function uploadMetadata(metadata: unknown, ctx: UploadContext): Promise<string> {

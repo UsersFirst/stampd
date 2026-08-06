@@ -10,7 +10,7 @@ import {
     type Address,
     type EventDraft,
 } from "@stampd/shared";
-import {uploadImage, uploadMetadata} from "../lib/upload";
+import {prepareImage, uploadPreparedImage, uploadMetadata, type PreparedUpload} from "../lib/upload";
 
 type Stage = "idle" | "uploading-art" | "uploading-metadata" | "awaiting-signature" | "confirming" | "done";
 
@@ -27,6 +27,20 @@ function toDateOrNull(value: string): Date | null {
     return value ? new Date(value) : null;
 }
 
+/// A wallet that signs in a popup reports a blocked popup as an unreachable `window.opener`,
+/// which reads as a fault in the app rather than something the browser did and the organizer can
+/// undo. Name the actual remedy — the raw text sends people to look in the wrong place.
+function describeFailure(caught: unknown): string {
+    const message = caught instanceof Error ? caught.message : String(caught);
+    if (/opener|popup|pop-up/i.test(message)) {
+        return (
+            "Your browser blocked the wallet window. Allow pop-ups for this site and try again — " +
+            "on iOS, tap the address bar and choose to allow."
+        );
+    }
+    return message;
+}
+
 export function CreateEventForm() {
     const {address} = useAccount();
     const chainId = useChainId();
@@ -38,6 +52,9 @@ export function CreateEventForm() {
     const [description, setDescription] = useState("");
     const [file, setFile] = useState<File | null>(null);
     const [preview, setPreview] = useState<string | null>(null);
+    /// Read and hashed as soon as the file is chosen, so submitting can reach the wallet without
+    /// awaiting anything — see `prepareImage`.
+    const [prepared, setPrepared] = useState<PreparedUpload | null>(null);
     const [maxSupply, setMaxSupply] = useState("0");
     const [startsAt, setStartsAt] = useState("");
     const [endsAt, setEndsAt] = useState("");
@@ -70,6 +87,13 @@ export function CreateEventForm() {
     function onFileChange(selected: File | null) {
         setFile(selected);
         setPreview(selected ? URL.createObjectURL(selected) : null);
+        setPrepared(null);
+        if (!selected) return;
+        // Errors are surfaced on submit rather than here; a file too large should not clear
+        // itself out from under someone mid-form.
+        void prepareImage(selected)
+            .then(setPrepared)
+            .catch(() => setPrepared(null));
     }
 
     async function onSubmit(submitEvent: FormEvent) {
@@ -91,9 +115,14 @@ export function CreateEventForm() {
             signMessage: (message: string) => signMessageAsync({message}),
         };
 
+        if (!prepared) return setError("Still reading the image — try again in a moment.");
+
         try {
             setStage("uploading-art");
-            const imageUrl = await uploadImage(file, uploadCtx);
+            // First await in the handler, so the wallet popup opens while the tap is still
+            // active. Anything awaited before this costs the browser's transient activation and
+            // Safari blocks the popup.
+            const imageUrl = await uploadPreparedImage(prepared, uploadCtx);
 
             const draft: EventDraft = {
                 name,
@@ -124,7 +153,7 @@ export function CreateEventForm() {
             setStage("confirming");
         } catch (caught) {
             setStage("idle");
-            setError(caught instanceof Error ? caught.message : String(caught));
+            setError(describeFailure(caught));
         }
     }
 
