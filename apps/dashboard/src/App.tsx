@@ -18,9 +18,7 @@ export function App() {
 
     // Keyed on *signer*, matching what `mintBatch` enforces — being an event's organizer does not
     // let you issue its badges if someone else holds the signing key.
-    const canScan = address
-        ? events.some((e) => e.signer.toLowerCase() === address.toLowerCase())
-        : false;
+    const canScan = address ? events.some((e) => e.signer.toLowerCase() === address.toLowerCase()) : false;
 
     const [chosenTab, setChosenTab] = useState<Tab | null>(null);
 
@@ -40,15 +38,7 @@ export function App() {
             <WalletBar />
 
             <main>
-                {!isConnected ? (
-                    <section className="card empty">
-                        <Logo variant="lockup" width={200} className="hero-logo" />
-                        <p className="muted">
-                            Connect the wallet you want to organize from. It will own your events and can rotate
-                            their signing keys.
-                        </p>
-                    </section>
-                ) : !onDeployedChain ? (
+                {isConnected && !onDeployedChain ? (
                     /* Blocking rather than warning. Every action below begins with a wallet
                        signature, and a smart wallet signs a chain-bound signature — so on the
                        wrong network the first upload fails verification no matter what, after the
@@ -68,68 +58,87 @@ export function App() {
                             {isPending ? "Switching…" : "Switch to Base Sepolia"}
                         </button>
                     </section>
-                ) : isLoading ? (
-                    /* Which tabs exist depends on a contract read. Rendering the bar and then
-                       adding a tab to it a moment later reads as a glitch, so wait rather than
-                       guess. */
-                    <section className="card empty">
-                        <p className="muted">Loading events…</p>
-                    </section>
                 ) : (
                     <>
-                        <nav className="tabs" role="tablist" aria-label="Organizer views">
-                            <button
-                                role="tab"
-                                type="button"
-                                id="tab-create"
-                                aria-selected={tab === "create"}
-                                aria-controls="panel-create"
-                                className={tab === "create" ? "tab active" : "tab"}
-                                onClick={() => setTab("create")}
-                            >
-                                Create event
-                            </button>
-                            {/* Only shown when this wallet signs for something. A Scan tab that
-                                can only say "you have no events" is furniture. */}
-                            {canScan && (
-                                <button
-                                    role="tab"
-                                    type="button"
-                                    id="tab-scan"
-                                    aria-selected={tab === "scan"}
-                                    aria-controls="panel-scan"
-                                    className={tab === "scan" ? "tab active" : "tab"}
-                                    onClick={() => setTab("scan")}
-                                >
-                                    Scan attendee
-                                </button>
-                            )}
-                            <button
-                                role="tab"
-                                type="button"
-                                id="tab-all"
-                                aria-selected={tab === "all"}
-                                aria-controls="panel-all"
-                                className={tab === "all" ? "tab active" : "tab"}
-                                onClick={() => setTab("all")}
-                            >
-                                All events
-                            </button>
-                        </nav>
+                        {/* Only while disconnected. Everything below is readable without a wallet —
+                            All events reads the chain, not the wallet — but nothing can be
+                            *created* without one, so say so once and then get out of the way.
+                            Rendered above the loading gate because it depends on nothing: a
+                            visitor should not stare at a bare "Loading…" with no idea where they
+                            have landed. */}
+                        {!isConnected && (
+                            <section className="card empty">
+                                <Logo variant="lockup" width={200} className="hero-logo" />
+                                <p className="muted">
+                                    Connect the wallet you want to organize from. It will own your events and can
+                                    rotate their signing keys.
+                                </p>
+                            </section>
+                        )}
 
-                        {tab === "create" ? (
-                            <div role="tabpanel" id="panel-create" aria-labelledby="tab-create">
-                                <CreateEventForm />
-                            </div>
-                        ) : tab === "scan" ? (
-                            <div role="tabpanel" id="panel-scan" aria-labelledby="tab-scan">
-                                <ScanAndMint />
-                                <MyEvents />
-                            </div>
+                        {isLoading ? (
+                            /* Which tabs exist depends on a contract read. Rendering the bar and
+                               then adding a tab to it a moment later reads as a glitch. */
+                            <section className="card empty">
+                                <p className="muted">Loading events…</p>
+                            </section>
                         ) : (
-                            <div role="tabpanel" id="panel-all" aria-labelledby="tab-all">
-                                <AllEvents />
-                            </div>
+                            <>
+                                <nav className="tabs" role="tablist" aria-label="Organizer views">
+                                    <button
+                                        role="tab"
+                                        type="button"
+                                        id="tab-create"
+                                        aria-selected={tab === "create"}
+                                        aria-controls="panel-create"
+                                        className={tab === "create" ? "tab active" : "tab"}
+                                        onClick={() => setTab("create")}
+                                    >
+                                        Create event
+                                    </button>
+                                    {/* Only shown when this wallet signs for something. A Scan tab
+                                        that can only say "you have no events" is furniture. */}
+                                    {canScan && (
+                                        <button
+                                            role="tab"
+                                            type="button"
+                                            id="tab-scan"
+                                            aria-selected={tab === "scan"}
+                                            aria-controls="panel-scan"
+                                            className={tab === "scan" ? "tab active" : "tab"}
+                                            onClick={() => setTab("scan")}
+                                        >
+                                            Scan attendee
+                                        </button>
+                                    )}
+                                    <button
+                                        role="tab"
+                                        type="button"
+                                        id="tab-all"
+                                        aria-selected={tab === "all"}
+                                        aria-controls="panel-all"
+                                        className={tab === "all" ? "tab active" : "tab"}
+                                        onClick={() => setTab("all")}
+                                    >
+                                        All events
+                                    </button>
+                                </nav>
+
+                                {tab === "create" ? (
+                                    <div role="tabpanel" id="panel-create" aria-labelledby="tab-create">
+                                        <CreateEventForm />
+                                    </div>
+                                ) : tab === "scan" ? (
+                                    <div role="tabpanel" id="panel-scan" aria-labelledby="tab-scan">
+                                        <ScanAndMint />
+                                        <MyEvents />
+                                    </div>
+                                ) : (
+                                    <div role="tabpanel" id="panel-all" aria-labelledby="tab-all">
+                                        <AllEvents />
+                                    </div>
+                                )}
+                            </>
                         )}
                     </>
                 )}
