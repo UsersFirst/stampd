@@ -193,7 +193,7 @@ same address there whenever it is wanted.
 
 ## Image screening
 
-Badge art is screened by **Google Cloud Vision SafeSearch** before it reaches R2.
+Badge art is screened by **Google Cloud Vision SafeSearch**.
 
 The check runs in the Worker rather than the dashboard, because `/api/upload` is a public
 endpoint authorized by a wallet signature — anyone can POST to it with `curl`, so a check in
@@ -208,24 +208,48 @@ generation rather than to classifying an uploaded image.
 wrangler secret put GOOGLE_VISION_API_KEY --config apps/api/wrangler.toml
 ```
 
-Without that secret, screening is skipped rather than failing every upload, so the Worker can
-be deployed before the key exists. `GET /api/health` reports which state it is in.
+Without that secret, screening is skipped entirely and no queue builds up — an image nobody
+intended to screen should not be chased forever. `GET /api/health` reports which state it is in.
 
 Thresholds are `MODERATION_THRESHOLD_ADULT`, `_RACY` and `_VIOLENCE` in `wrangler.toml`, on
 Google's five-point scale (1 `VERY_UNLIKELY` … 5 `VERY_LIKELY`); an upload is refused at or
 above the threshold. `racy` defaults a notch higher than the others because it fires on
 swimwear and close-ups, and a false rejection is silent to the organizer.
 
-Two behaviours worth knowing:
+### It fails open, and the sweep is what makes that safe
 
-- **It fails closed.** If Vision cannot be reached the upload is refused with a 503, not
-  admitted unscored. An organizer retrying in a minute is cheaper than this domain serving
-  something illegal into every wallet that renders the badge.
-- **Verdicts are cached in D1 forever**, keyed by the image's SHA-256. Object keys are already
-  content-addressed, so identical bytes are the same image and cannot change meaning. The cache
-  is checked *before* the API key, so an image already refused stays refused even if screening
-  is later switched off — and resubmitting a rejected image cannot burn moderation quota.
+If Vision cannot be reached the image is **stored and served**, and recorded as `pending`. An
+organizer at a live event whose art is blocked by a third-party outage is stuck with a room
+waiting and no workaround; a short window in which an *unscreened* image is reachable by
+whoever holds its URL is the smaller cost. Note what is exposed there: content nothing has
+judged yet, not content known to be unacceptable.
+
+A cron trigger (`*/10 * * * *`) sweeps the queue, scores what is pending, and **deletes from
+R2** anything it refuses. Without that half, "fail open" quietly becomes "never checked".
+
+Retries are bounded. After `MAX_MODERATION_ATTEMPTS` failures an image stops being retried and
+is reported by `/api/health` as `unscreened.awaitingReview`, where a person looks at it and
+decides. Retrying forever hides a persistent failure behind a queue that never drains; giving
+up silently leaves an unscreened image served with nobody told.
+
+```json
+{"moderation": "active", "unscreened": {"retrying": 0, "awaitingReview": 1}}
+```
+
+`retrying` drains on its own. `awaitingReview` never will — that number is a work queue.
+
+### What is recorded
+
+`moderation_events` is append-only: every attempt, from the upload path and from the sweep,
+with the SafeSearch likelihoods, which categories crossed their thresholds, the verbatim error
+on a failure, and the submitting address. `image_moderation` holds only current state and
+overwrites on retry, so five failed attempts leave only the fifth — the pattern across attempts
+is usually the interesting part, which is why both exist.
+
+Verdicts are cached forever, keyed by the image SHA-256. Object keys are already
+content-addressed, so identical bytes are the same image and cannot come to mean something
+else. The cache is consulted *before* the API key, so an image already refused stays refused
+even if screening is later switched off, and resubmitting a rejected image cannot burn quota.
 
 The refusal message names no category and no score. That detail is a tuning guide for anyone
-probing the threshold; it is recorded in D1 either way, along with the submitting address, so a
-wallet accumulating rejections is visible.
+probing the threshold; it is in D1 either way, so a wallet accumulating rejections is visible.

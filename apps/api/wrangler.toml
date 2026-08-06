@@ -7,6 +7,12 @@ compatibility_date = "2026-08-01"
 # and usersfirst.com DNS is at name.com. Revisit if that zone ever moves. See issue #1.
 workers_dev = true
 
+# Batch-screens images that were admitted unscreened because Vision was unreachable. Uploads
+# fail open so a live event is never blocked by a third-party outage; this is what stops that
+# becoming "never checked". Ten minutes bounds how long an unscreened image is served.
+[triggers]
+crons = ["*/10 * * * *"]
+
 [vars]
 # Browser origins permitted to call this API. The dashboard is served from GitHub Pages on
 # stampd.usersfirst.com; the Vite dev server is on 5173.

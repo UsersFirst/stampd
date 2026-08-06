@@ -9,7 +9,7 @@
 /// EIP-712 voucher signing alongside it.
 
 import {createPublicClient, http, recoverMessageAddress, isAddress} from "viem";
-import {classifyImage, describeScore, thresholdsFrom} from "./moderation";
+import {classifyImage, describeScore, thresholdsFrom, type SafeSearchScores} from "./moderation";
 import {base, baseSepolia} from "viem/chains";
 import {
     UPLOAD_AUTH_WINDOW_SECONDS,
@@ -178,22 +178,28 @@ async function checkUploadAuth(request: Request, env: Env, digest: string): Prom
     return json({error: "Invalid signature."}, 401);
 }
 
-/// Screens an image before it is stored. Returns an error Response to refuse the upload, or null
-/// to let it through.
+/// Screens an image before it is stored.
 ///
-/// Fails *closed*. If the moderator cannot be reached the upload is refused with a 503 rather than
-/// admitted unscored: an organizer retrying in a minute is a far smaller cost than this domain
-/// serving something illegal into every wallet that renders the badge. The one exception is having
-/// no API key at all, which is a deliberate "not configured yet" rather than a failure.
+/// Fails *open*. If the moderator cannot be reached the image is stored and served, and marked
+/// `pending` for the sweep to score shortly afterwards. An organizer at a live event whose art is
+/// refused because a third-party API is down is stuck, with no workaround and a room waiting;
+/// that is a worse failure than a short window in which an unscreened image is reachable by
+/// whoever holds its URL.
+///
+/// What makes that safe rather than merely permissive is the `pending` row. Without a record that
+/// something went unchecked, "fail open" quietly becomes "never checked".
+///
+/// @returns `refusal` to reject the upload outright, and `pending` when it was admitted unscored
+///          and the caller must record it for the sweep.
 async function moderate(
     bytes: ArrayBuffer,
     digest: string,
     submittedBy: string | null,
     contentType: string,
     env: Env,
-): Promise<Response | null> {
+): Promise<{refusal: Response | null; pending: boolean}> {
     // Metadata JSON has no pixels to look at, and its fields are already bounded by the schema.
-    if (contentType === "application/json") return null;
+    if (contentType === "application/json") return {refusal: null, pending: false};
 
     // Checked before the key, deliberately. Content-addressed keys make a verdict permanent —
     // identical bytes are the same image forever — so an image already judged unacceptable stays
@@ -203,26 +209,42 @@ async function moderate(
         const cached = await env.DB.prepare("SELECT verdict FROM image_moderation WHERE sha256 = ?")
             .bind(digest)
             .first<{verdict: string}>();
-        if (cached?.verdict === "reject") return json({error: REFUSAL_MESSAGE}, 422);
-        if (cached?.verdict === "allow") return null;
+        if (cached?.verdict === "reject") return {refusal: json({error: REFUSAL_MESSAGE}, 422), pending: false};
+        if (cached?.verdict === "allow") return {refusal: null, pending: false};
+        // A row already 'pending' is re-queued rather than re-scored inline: the sweep owns it.
+        if (cached?.verdict === "pending") return {refusal: null, pending: true};
     } catch {
         // A cache miss must never be the reason an upload fails; fall through and ask the vendor.
     }
 
-    if (!env.GOOGLE_VISION_API_KEY) return null;
+    // Not configured is not the same as unscreened. Leaving no row means the sweep will not chase
+    // an image nobody ever intended to screen.
+    if (!env.GOOGLE_VISION_API_KEY) return {refusal: null, pending: false};
 
     let result;
     try {
         result = await classifyImage(bytes, env.GOOGLE_VISION_API_KEY, thresholdsFrom(env));
-    } catch {
-        return json({error: "Could not check this image right now. Try again in a moment."}, 503);
+    } catch (error) {
+        // Fail open, but on the record. The upload proceeds and the sweep scores it shortly. This
+        // row is the reason an unscreened image was served, so it is worth more than a log line.
+        await logModeration(env, {
+            sha256: digest,
+            outcome: "error",
+            source: "upload",
+            error: error instanceof Error ? error.message : String(error),
+            submittedBy,
+        });
+        return {refusal: null, pending: true};
     }
 
     try {
         await env.DB.prepare(
             `INSERT INTO image_moderation (sha256, verdict, adult, racy, violence, medical, spoof, submitted_by)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(sha256) DO NOTHING`,
+             ON CONFLICT(sha256) DO UPDATE SET
+                 verdict = excluded.verdict, adult = excluded.adult, racy = excluded.racy,
+                 violence = excluded.violence, medical = excluded.medical, spoof = excluded.spoof,
+                 checked_at = strftime('%s', 'now')`,
         )
             .bind(
                 digest,
@@ -239,20 +261,187 @@ async function moderate(
         // Recording the verdict is bookkeeping. Failing to write it must not change the decision.
     }
 
-    if (result.verdict === "reject") {
-        console.log(
-            `moderation reject ${digest} adult=${describeScore(result.scores.adult)} ` +
-                `racy=${describeScore(result.scores.racy)} violence=${describeScore(result.scores.violence)}`,
-        );
-        return json({error: REFUSAL_MESSAGE}, 422);
+    await logModeration(env, {
+        sha256: digest,
+        outcome: result.verdict,
+        source: "upload",
+        scores: result.scores,
+        reasons: result.reasons,
+        submittedBy,
+    });
+
+    if (result.verdict === "reject") return {refusal: json({error: REFUSAL_MESSAGE}, 422), pending: false};
+
+    return {refusal: null, pending: false};
+}
+
+/// Scores everything admitted unscored, deletes what it refuses, and is the half of "fail open"
+/// that makes it defensible. Driven by the cron trigger.
+///
+/// Retries are bounded. An image that fails `MAX_MODERATION_ATTEMPTS` times stops being retried
+/// and stays pending, where the health endpoint reports it as awaiting review — a person then
+/// looks at it and decides. Retrying forever would hide a persistent failure behind a queue that
+/// never drains; giving up silently would leave an unscreened image served with nobody told.
+///
+/// @returns counts, so an operator can see it did something.
+export async function sweepPending(env: Env, limit = 25): Promise<{scanned: number; rejected: number}> {
+    if (!env.GOOGLE_VISION_API_KEY) return {scanned: 0, rejected: 0};
+
+    // Ceiling interpolated for the same reason as in the health query — bound, it let an image
+    // past its retry limit, which is how a permanently failing image would be retried forever.
+    const pending = await env.DB.prepare(
+        `SELECT sha256, object_key, attempts FROM image_moderation
+         WHERE verdict = 'pending' AND attempts < ${MAX_MODERATION_ATTEMPTS}
+         ORDER BY attempts ASC, checked_at ASC LIMIT ?`,
+    )
+        .bind(limit)
+        .all<{sha256: string; object_key: string | null; attempts: number}>();
+
+    let rejected = 0;
+    let scanned = 0;
+
+    for (const row of pending.results ?? []) {
+        if (!row.object_key) continue;
+
+        const object = await env.ASSETS_BUCKET.get(row.object_key);
+        if (!object) {
+            // Already gone. Nothing left to screen, and leaving it pending would retry forever.
+            await env.DB.prepare("UPDATE image_moderation SET verdict = 'allow', last_error = 'object missing' WHERE sha256 = ?")
+                .bind(row.sha256)
+                .run();
+            continue;
+        }
+
+        try {
+            const result = await classifyImage(
+                await object.arrayBuffer(),
+                env.GOOGLE_VISION_API_KEY,
+                thresholdsFrom(env),
+            );
+            scanned += 1;
+
+            // Delete before recording, so a failure between the two leaves the row pending and
+            // the object gone rather than the row clean and the object still served.
+            if (result.verdict === "reject") {
+                await env.ASSETS_BUCKET.delete(row.object_key);
+                rejected += 1;
+            }
+
+            await logModeration(env, {
+                sha256: row.sha256,
+                objectKey: row.object_key,
+                outcome: result.verdict,
+                source: "sweep",
+                attempt: row.attempts + 1,
+                scores: result.scores,
+                reasons: result.reasons,
+            });
+
+            await env.DB.prepare(
+                `UPDATE image_moderation SET verdict = ?, adult = ?, racy = ?, violence = ?, medical = ?,
+                 spoof = ?, checked_at = strftime('%s','now'), last_error = NULL WHERE sha256 = ?`,
+            )
+                .bind(
+                    result.verdict,
+                    result.scores.adult,
+                    result.scores.racy,
+                    result.scores.violence,
+                    result.scores.medical,
+                    result.scores.spoof,
+                    row.sha256,
+                )
+                .run();
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            // Bounded retries, so one undecodable image cannot occupy the queue forever.
+            await env.DB.prepare(
+                "UPDATE image_moderation SET attempts = attempts + 1, last_error = ? WHERE sha256 = ?",
+            )
+                .bind(message.slice(0, 200), row.sha256)
+                .run();
+
+            // Every failed attempt, not just the last. Five rows saying "429" is a quota problem;
+            // five different messages is something else, and `last_error` alone cannot tell them
+            // apart because each retry overwrites the one before.
+            await logModeration(env, {
+                sha256: row.sha256,
+                objectKey: row.object_key,
+                outcome: "error",
+                source: "sweep",
+                attempt: row.attempts + 1,
+                error: message,
+            });
+        }
     }
 
-    return null;
+    return {scanned, rejected};
 }
+
+/// After this many failures an image stops being retried and stays visible in the pending count,
+/// where a human can look at it. Silently giving up would be worse than a queue that nags.
+const MAX_MODERATION_ATTEMPTS = 5;
 
 /// Deliberately does not say which category tripped, or how close the others came. That detail
 /// is a tuning guide for anyone probing the threshold, and it is in D1 for us either way.
 const REFUSAL_MESSAGE = "This image was refused by automated content screening. Please use different badge art.";
+
+interface ModerationLogEntry {
+    sha256: string;
+    objectKey?: string | null;
+    outcome: "allow" | "reject" | "error";
+    source: "upload" | "sweep";
+    attempt?: number;
+    scores?: SafeSearchScores;
+    reasons?: string[];
+    error?: string;
+    submittedBy?: string | null;
+}
+
+/// Appends to the screening history. Never throws: a decision has already been made by the time
+/// this is called, and losing the audit row must not change it or fail the request.
+///
+/// Also mirrored to `console.log`, so a failure is visible in `wrangler tail` during an incident
+/// without anyone having to query D1 first.
+async function logModeration(env: Env, entry: ModerationLogEntry): Promise<void> {
+    const detail =
+        entry.outcome === "error"
+            ? `error=${entry.error ?? "unknown"}`
+            : `adult=${describeScore(entry.scores?.adult ?? 0)} racy=${describeScore(entry.scores?.racy ?? 0)} ` +
+              `violence=${describeScore(entry.scores?.violence ?? 0)} medical=${describeScore(entry.scores?.medical ?? 0)} ` +
+              `spoof=${describeScore(entry.scores?.spoof ?? 0)}`;
+    console.log(
+        `moderation ${entry.outcome} via ${entry.source} sha=${entry.sha256} ` +
+            `key=${entry.objectKey ?? "-"} attempt=${entry.attempt ?? 0} ${detail}` +
+            (entry.reasons?.length ? ` reasons=${entry.reasons.join(",")}` : ""),
+    );
+
+    try {
+        await env.DB.prepare(
+            `INSERT INTO moderation_events
+                 (sha256, object_key, outcome, source, attempt, adult, racy, violence, medical, spoof,
+                  reasons, error, submitted_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+            .bind(
+                entry.sha256,
+                entry.objectKey ?? null,
+                entry.outcome,
+                entry.source,
+                entry.attempt ?? 0,
+                entry.scores?.adult ?? null,
+                entry.scores?.racy ?? null,
+                entry.scores?.violence ?? null,
+                entry.scores?.medical ?? null,
+                entry.scores?.spoof ?? null,
+                entry.reasons?.join(",") ?? null,
+                entry.error?.slice(0, 500) ?? null,
+                entry.submittedBy?.toLowerCase() ?? null,
+            )
+            .run();
+    } catch (caught) {
+        console.error(`moderation log write failed for ${entry.sha256}: ${String(caught)}`);
+    }
+}
 
 async function handleUpload(request: Request, env: Env): Promise<Response> {
     const contentType = (request.headers.get("content-type") ?? "").split(";")[0].trim();
@@ -276,7 +465,8 @@ async function handleUpload(request: Request, env: Env): Promise<Response> {
 
     // Only after authorization: moderation costs money per call, and an unauthenticated caller
     // must not be able to spend it.
-    const refusal = await moderate(bytes, digest, request.headers.get(UPLOAD_HEADERS.address), contentType, env);
+    const submittedBy = request.headers.get(UPLOAD_HEADERS.address);
+    const {refusal, pending} = await moderate(bytes, digest, submittedBy, contentType, env);
     if (refusal) return refusal;
 
     const key = `${digest.slice(0, 32)}.${EXTENSIONS[contentType] ?? "bin"}`;
@@ -288,6 +478,23 @@ async function handleUpload(request: Request, env: Env): Promise<Response> {
             cacheControl: "public, max-age=31536000, immutable",
         },
     });
+
+    // Recorded after the object exists, so the sweep is never handed a key pointing at nothing.
+    if (pending) {
+        try {
+            await env.DB.prepare(
+                `INSERT INTO image_moderation (sha256, verdict, object_key, submitted_by)
+                 VALUES (?, 'pending', ?, ?)
+                 ON CONFLICT(sha256) DO UPDATE SET object_key = excluded.object_key`,
+            )
+                .bind(digest, key, submittedBy?.toLowerCase() ?? null)
+                .run();
+        } catch (error) {
+            // This is the one bookkeeping failure that matters: without the row the image is
+            // served and nothing will ever screen it. Loud, since it needs a human.
+            console.error(`moderation queue write FAILED for ${key}: ${String(error)}`);
+        }
+    }
 
     // Derived from the request rather than configured, so the URL is correct on
     // workers.dev, on a custom domain, and in local dev without another setting to drift.
@@ -342,8 +549,28 @@ async function handleHealth(env: Env): Promise<Response> {
     // never has to be answered by reading the deploy logs.
     const moderation = env.GOOGLE_VISION_API_KEY ? "active" : "disabled (no GOOGLE_VISION_API_KEY)";
 
+    // The queue depth is the number that matters under fail-open: how many images are being
+    // served without having been screened. Split, because the two halves need different reactions
+    // — `retrying` drains on its own, `awaitingReview` never will and is a job for a person.
+    let unscreened: {retrying: number; awaitingReview: number} | string;
+    try {
+        // The attempt ceiling is interpolated, not bound. D1 does not reliably bind a parameter
+        // used in a comparison inside an aggregate filter — with `?` this counted an image on its
+        // sixth attempt as still retrying. It is a module constant rather than user input, so
+        // there is nothing here to inject.
+        const row = await env.DB.prepare(
+            `SELECT
+                 COALESCE(SUM(CASE WHEN attempts <  ${MAX_MODERATION_ATTEMPTS} THEN 1 ELSE 0 END), 0) AS retrying,
+                 COALESCE(SUM(CASE WHEN attempts >= ${MAX_MODERATION_ATTEMPTS} THEN 1 ELSE 0 END), 0) AS awaiting
+             FROM image_moderation WHERE verdict = 'pending'`,
+        ).first<{retrying: number; awaiting: number}>();
+        unscreened = {retrying: row?.retrying ?? 0, awaitingReview: row?.awaiting ?? 0};
+    } catch (error) {
+        unscreened = `unknown: ${error instanceof Error ? error.message : String(error)}`;
+    }
+
     const ok = Object.values(checks).every((v) => v === "ok");
-    return json({ok, checks, moderation}, ok ? 200 : 503);
+    return json({ok, checks, moderation, unscreened}, ok ? 200 : 503);
 }
 
 async function route(request: Request, env: Env): Promise<Response> {
@@ -379,5 +606,17 @@ export default {
     async fetch(request: Request, env: Env): Promise<Response> {
         if (request.method === "OPTIONS") return withCors(handlePreflight(request, env), request, env);
         return withCors(await route(request, env), request, env);
+    },
+
+    /// Drains the unscreened queue. This is the other half of failing open — without it, an image
+    /// admitted during an outage is never looked at, and screening becomes advisory.
+    async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+        ctx.waitUntil(
+            sweepPending(env).then(({scanned, rejected}) => {
+                if (scanned > 0 || rejected > 0) {
+                    console.log(`moderation sweep: scanned ${scanned}, removed ${rejected}`);
+                }
+            }),
+        );
     },
 } satisfies ExportedHandler<Env>;
