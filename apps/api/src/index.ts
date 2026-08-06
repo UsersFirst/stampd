@@ -90,7 +90,7 @@ function handlePreflight(request: Request, env: Env): Response {
     return new Response(null, {
         status: 204,
         headers: {
-            "access-control-allow-methods": "GET, POST, OPTIONS",
+            "access-control-allow-methods": "GET, HEAD, POST, OPTIONS",
             "access-control-allow-headers": ["content-type", ...Object.values(UPLOAD_HEADERS)].join(", "),
             "access-control-max-age": "86400",
         },
@@ -266,7 +266,13 @@ async function route(request: Request, env: Env): Promise<Response> {
     }
 
     if (url.pathname.startsWith("/api/asset/")) {
-        if (request.method !== "GET") return json({error: "Method not allowed"}, 405);
+        // HEAD as well as GET. NFT indexers, wallet image proxies, and caches routinely HEAD a
+        // metadata or image URL to learn its type and size before deciding to fetch it, and a 405
+        // there reads as a broken asset rather than an unsupported method. The Workers runtime
+        // drops the body from a HEAD response on its own, so the handler needs no special case.
+        if (request.method !== "GET" && request.method !== "HEAD") {
+            return json({error: "Method not allowed"}, 405);
+        }
         const key = url.pathname.slice("/api/asset/".length);
         if (!/^[a-f0-9]{32}\.[a-z]{3,4}$/.test(key)) return json({error: "Bad key"}, 400);
         return handleAsset(key, env);
