@@ -33,6 +33,12 @@ MODERATION_THRESHOLD_ADULT = "4"
 MODERATION_THRESHOLD_RACY = "5"
 MODERATION_THRESHOLD_VIOLENCE = "4"
 
+# Operator sign-in. Shared with the Tandemonium dashboard, which is why the id looks unrelated
+# to stampd — one OAuth client with several authorized origins. Not a secret: a client id is
+# embedded in every page that uses it. The allowlist of who may act as an operator *is* kept out
+# of the repo:  wrangler secret put OPERATOR_EMAILS
+GOOGLE_CLIENT_ID = "640682648249-dp1dou0mmpkm6m697oakbe9odabt1dui.apps.googleusercontent.com"
+
 [[r2_buckets]]
 binding = "ASSETS_BUCKET"
 bucket_name = "stampd-nfts"
@@ -62,6 +68,12 @@ RPC_URL_BASE = "https://mainnet.base.org"
 MODERATION_THRESHOLD_ADULT = "4"
 MODERATION_THRESHOLD_RACY = "5"
 MODERATION_THRESHOLD_VIOLENCE = "4"
+
+# Operator sign-in. Shared with the Tandemonium dashboard, which is why the id looks unrelated
+# to stampd — one OAuth client with several authorized origins. Not a secret: a client id is
+# embedded in every page that uses it. The allowlist of who may act as an operator *is* kept out
+# of the repo:  wrangler secret put OPERATOR_EMAILS
+GOOGLE_CLIENT_ID = "640682648249-dp1dou0mmpkm6m697oakbe9odabt1dui.apps.googleusercontent.com"
 
 [[env.dev.r2_buckets]]
 binding = "ASSETS_BUCKET"
