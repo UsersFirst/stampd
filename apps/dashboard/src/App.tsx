@@ -8,8 +8,7 @@ import {MyEvents} from "./components/MyEvents";
 import {ScanAndMint} from "./components/ScanAndMint";
 import {AllEvents} from "./components/AllEvents";
 import {useEvents} from "./hooks/useEvents";
-
-type Tab = "create" | "scan" | "all";
+import {resolveTab, type Tab} from "./lib/tabs";
 
 export function App() {
     const {address, isConnected} = useAccount();
@@ -17,20 +16,22 @@ export function App() {
     const {switchChain, isPending} = useSwitchChain();
     const {events, isLoading} = useEvents();
 
-    // Organizer *or* signer. Someone who was handed signing duty for another organizer's event
-    // has nothing to create but every reason to badge, and hiding the tabs from them would hide
-    // the only screen they need.
-    const mine = address
-        ? events.filter(
-              (e) =>
-                  e.organizer.toLowerCase() === address.toLowerCase() ||
-                  e.signer.toLowerCase() === address.toLowerCase(),
-          )
-        : [];
+    // Keyed on *signer*, matching what `mintBatch` enforces — being an event's organizer does not
+    // let you issue its badges if someone else holds the signing key.
+    const canScan = address
+        ? events.some((e) => e.signer.toLowerCase() === address.toLowerCase())
+        : false;
 
-    // Defaults to badging. Creating an event happens once, at a desk; badging happens repeatedly
-    // and is what someone opening this on a phone at a door came to do.
-    const [tab, setTab] = useState<Tab>("scan");
+    const [chosenTab, setChosenTab] = useState<Tab | null>(null);
+
+    // Create event and All events are always available. All events lists the whole contract, so it
+    // is useful to someone who has never made one — arguably most useful to them. Only Scan
+    // attendee depends on having something to scan against.
+    //
+    // Derived rather than corrected in an effect, so switching to a wallet with no events cannot
+    // leave a tab selected that has nothing behind it.
+    const tab = resolveTab(chosenTab, canScan);
+    const setTab = setChosenTab;
 
     const onDeployedChain = isDeployedOn(chainId);
 
@@ -68,16 +69,12 @@ export function App() {
                         </button>
                     </section>
                 ) : isLoading ? (
-                    /* Whether the tabs belong here depends on a contract read. Rendering the
-                       untabbed form first and swapping it for tabs a moment later reads as a
-                       glitch, so wait rather than guess. */
+                    /* Which tabs exist depends on a contract read. Rendering the bar and then
+                       adding a tab to it a moment later reads as a glitch, so wait rather than
+                       guess. */
                     <section className="card empty">
-                        <p className="muted">Loading your events…</p>
+                        <p className="muted">Loading events…</p>
                     </section>
-                ) : mine.length === 0 ? (
-                    /* Nothing to scan against yet, and a tab bar whose tabs are mostly empty is
-                       just furniture. The tabs appear with this wallet's first event. */
-                    <CreateEventForm />
                 ) : (
                     <>
                         <nav className="tabs" role="tablist" aria-label="Organizer views">
@@ -92,17 +89,21 @@ export function App() {
                             >
                                 Create event
                             </button>
-                            <button
-                                role="tab"
-                                type="button"
-                                id="tab-scan"
-                                aria-selected={tab === "scan"}
-                                aria-controls="panel-scan"
-                                className={tab === "scan" ? "tab active" : "tab"}
-                                onClick={() => setTab("scan")}
-                            >
-                                Scan attendee
-                            </button>
+                            {/* Only shown when this wallet signs for something. A Scan tab that
+                                can only say "you have no events" is furniture. */}
+                            {canScan && (
+                                <button
+                                    role="tab"
+                                    type="button"
+                                    id="tab-scan"
+                                    aria-selected={tab === "scan"}
+                                    aria-controls="panel-scan"
+                                    className={tab === "scan" ? "tab active" : "tab"}
+                                    onClick={() => setTab("scan")}
+                                >
+                                    Scan attendee
+                                </button>
+                            )}
                             <button
                                 role="tab"
                                 type="button"
