@@ -32,14 +32,21 @@ for (const chainId of readdirSync(broadcastDir)) {
     if (!creation?.contractAddress) continue;
 
     const address = creation.contractAddress;
-    if (deployments[chainId] === address) {
+
+    // The deployment block, so log queries have a floor to start from. Without it every
+    // `getLogs` would either scan from genesis — which public RPCs refuse — or guess.
+    const receipt = run.receipts?.find((r) => r.contractAddress?.toLowerCase() === address.toLowerCase());
+    const deployedAtBlock = receipt?.blockNumber ? Number(BigInt(receipt.blockNumber)) : null;
+
+    const existing = deployments[chainId];
+    if (existing?.address === address && existing?.deployedAtBlock === deployedAtBlock) {
         console.log(`chain ${chainId}: unchanged (${address})`);
         continue;
     }
 
-    deployments[chainId] = address;
+    deployments[chainId] = {address, deployedAtBlock};
     updated += 1;
-    console.log(`chain ${chainId}: ${address}`);
+    console.log(`chain ${chainId}: ${address} @ block ${deployedAtBlock ?? "unknown"}`);
 }
 
 if (updated > 0) {

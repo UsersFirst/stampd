@@ -6,9 +6,10 @@ import {WalletBar} from "./components/WalletBar";
 import {CreateEventForm} from "./components/CreateEventForm";
 import {MyEvents} from "./components/MyEvents";
 import {ScanAndMint} from "./components/ScanAndMint";
+import {AllEvents} from "./components/AllEvents";
 import {useEvents} from "./hooks/useEvents";
 
-type Tab = "create" | "attendees";
+type Tab = "create" | "scan" | "all";
 
 export function App() {
     const {address, isConnected} = useAccount();
@@ -29,7 +30,7 @@ export function App() {
 
     // Defaults to badging. Creating an event happens once, at a desk; badging happens repeatedly
     // and is what someone opening this on a phone at a door came to do.
-    const [tab, setTab] = useState<Tab>("attendees");
+    const [tab, setTab] = useState<Tab>("scan");
 
     const onDeployedChain = isDeployedOn(chainId);
 
@@ -74,8 +75,8 @@ export function App() {
                         <p className="muted">Loading your events…</p>
                     </section>
                 ) : mine.length === 0 ? (
-                    /* Nothing to put behind an Attendees tab yet, and a tab bar with one usable
-                       side is just furniture. The tabs appear with the first event. */
+                    /* Nothing to scan against yet, and a tab bar whose tabs are mostly empty is
+                       just furniture. The tabs appear with this wallet's first event. */
                     <CreateEventForm />
                 ) : (
                     <>
@@ -94,13 +95,24 @@ export function App() {
                             <button
                                 role="tab"
                                 type="button"
-                                id="tab-attendees"
-                                aria-selected={tab === "attendees"}
-                                aria-controls="panel-attendees"
-                                className={tab === "attendees" ? "tab active" : "tab"}
-                                onClick={() => setTab("attendees")}
+                                id="tab-scan"
+                                aria-selected={tab === "scan"}
+                                aria-controls="panel-scan"
+                                className={tab === "scan" ? "tab active" : "tab"}
+                                onClick={() => setTab("scan")}
                             >
-                                Attendees
+                                Scan attendee
+                            </button>
+                            <button
+                                role="tab"
+                                type="button"
+                                id="tab-all"
+                                aria-selected={tab === "all"}
+                                aria-controls="panel-all"
+                                className={tab === "all" ? "tab active" : "tab"}
+                                onClick={() => setTab("all")}
+                            >
+                                All events
                             </button>
                         </nav>
 
@@ -108,10 +120,14 @@ export function App() {
                             <div role="tabpanel" id="panel-create" aria-labelledby="tab-create">
                                 <CreateEventForm />
                             </div>
-                        ) : (
-                            <div role="tabpanel" id="panel-attendees" aria-labelledby="tab-attendees">
+                        ) : tab === "scan" ? (
+                            <div role="tabpanel" id="panel-scan" aria-labelledby="tab-scan">
                                 <ScanAndMint />
                                 <MyEvents />
+                            </div>
+                        ) : (
+                            <div role="tabpanel" id="panel-all" aria-labelledby="tab-all">
+                                <AllEvents />
                             </div>
                         )}
                     </>

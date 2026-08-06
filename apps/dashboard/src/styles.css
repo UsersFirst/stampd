@@ -324,7 +324,51 @@ input[type="checkbox"] {
     gap: 1rem;
 }
 
-/* Step markers. The Attendees screen is two steps by default, and saying so beats making
+/* Event cards. A list rather than a table because the art is the point, and a table of
+   images collapses badly on a phone. */
+.event-cards {
+    list-style: none;
+    padding: 0;
+    margin: 1rem 0 0;
+    display: grid;
+    gap: 0.75rem;
+}
+.event-card {
+    display: flex;
+    gap: 0.85rem;
+    align-items: center;
+    padding: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+.event-art {
+    width: 72px;
+    height: 72px;
+    flex: 0 0 72px;
+    object-fit: cover;
+    border-radius: 8px;
+    background: var(--bg);
+}
+.event-art-missing {
+    display: grid;
+    place-items: center;
+    font-size: 0.7rem;
+    border: 1px dashed var(--border);
+}
+.event-body {
+    min-width: 0;
+}
+.event-body h3 {
+    margin: 0 0 0.15rem;
+    font-size: 1rem;
+    /* Organizer-supplied, so it can be anything; keep one long name from blowing out the row. */
+    overflow-wrap: anywhere;
+}
+.event-body p {
+    margin: 0.1rem 0;
+}
+
+/* Step markers. The Scan attendee screen is two steps by default, and saying so beats making
    someone infer it from the layout. */
 .step {
     margin: 1.25rem 0 0;

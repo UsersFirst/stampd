@@ -1,3 +1,6 @@
 {
-  "84532": "0xfe70f7d29686aa8423a5d20d0618afa4929fc88b"
+  "84532": {
+    "address": "0xfe70f7d29686aa8423a5d20d0618afa4929fc88b",
+    "deployedAtBlock": 45106182
+  }
 }
