@@ -227,10 +227,20 @@ judged yet, not content known to be unacceptable.
 A cron trigger (`*/10 * * * *`) sweeps the queue, scores what is pending, and **deletes from
 R2** anything it refuses. Without that half, "fail open" quietly becomes "never checked".
 
-Retries are bounded. After `MAX_MODERATION_ATTEMPTS` failures an image stops being retried and
-is reported by `/api/health` as `unscreened.awaitingReview`, where a person looks at it and
-decides. Retrying forever hides a persistent failure behind a queue that never drains; giving
-up silently leaves an unscreened image served with nobody told.
+Retries happen **only** when SafeSearch fails to produce an answer — a network error, a
+non-200, an API error body, a missing annotation. A successful verdict is terminal: a refused
+image is never retried, and neither is an approved one.
+
+They are spaced, not merely counted. The wait doubles from ten minutes, so five attempts fall
+at roughly 10, 20, 40, 80 and 160 minutes — a little over five hours end to end. The window
+matters more than the count, because the failures being retried are outages and quota
+exhaustion, which last minutes to hours; a schedule that spends its whole allowance in under an
+hour just converts a vendor problem into manual work.
+
+After the last attempt an image stops being retried and is reported by `/api/health` as
+`unscreened.awaitingReview`, where a person looks at it and decides. Retrying forever hides a
+persistent failure behind a queue that never drains; giving up silently leaves an unscreened
+image served with nobody told.
 
 ```json
 {"moderation": "active", "unscreened": {"retrying": 0, "awaitingReview": 1}}

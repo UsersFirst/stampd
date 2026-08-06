@@ -289,9 +289,17 @@ export async function sweepPending(env: Env, limit = 25): Promise<{scanned: numb
 
     // Ceiling interpolated for the same reason as in the health query — bound, it let an image
     // past its retry limit, which is how a permanently failing image would be retried forever.
+    //
+    // The backoff term is what stretches five attempts across hours instead of minutes. Without
+    // it every cron retried every pending row, so the whole allowance was spent in under an hour
+    // and an outage lasting longer than that pushed images into manual review that would have
+    // resolved themselves. Doubling from ten minutes gives 10, 20, 40, 80, 160 — a little over
+    // five hours end to end.
     const pending = await env.DB.prepare(
         `SELECT sha256, object_key, attempts FROM image_moderation
-         WHERE verdict = 'pending' AND attempts < ${MAX_MODERATION_ATTEMPTS}
+         WHERE verdict = 'pending'
+           AND attempts < ${MAX_MODERATION_ATTEMPTS}
+           AND checked_at <= strftime('%s','now') - (${RETRY_BASE_SECONDS} * (1 << attempts))
          ORDER BY attempts ASC, checked_at ASC LIMIT ?`,
     )
         .bind(limit)
@@ -353,9 +361,12 @@ export async function sweepPending(env: Env, limit = 25): Promise<{scanned: numb
                 .run();
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            // Bounded retries, so one undecodable image cannot occupy the queue forever.
+            // `checked_at` moves too, because it is what the backoff window is measured from.
+            // Leaving it at the upload time would make every retry immediately eligible again.
             await env.DB.prepare(
-                "UPDATE image_moderation SET attempts = attempts + 1, last_error = ? WHERE sha256 = ?",
+                `UPDATE image_moderation
+                 SET attempts = attempts + 1, last_error = ?, checked_at = strftime('%s','now')
+                 WHERE sha256 = ?`,
             )
                 .bind(message.slice(0, 200), row.sha256)
                 .run();
@@ -380,6 +391,15 @@ export async function sweepPending(env: Env, limit = 25): Promise<{scanned: numb
 /// After this many failures an image stops being retried and stays visible in the pending count,
 /// where a human can look at it. Silently giving up would be worse than a queue that nags.
 const MAX_MODERATION_ATTEMPTS = 5;
+
+/// Backoff base. The wait before attempt *n* is this doubled *n* times, so the five attempts fall
+/// at roughly 10, 20, 40, 80 and 160 minutes — a little over five hours in total.
+///
+/// The window matters more than the count. Retries exist for one reason: SafeSearch failed to
+/// produce an answer. Those failures are outages and quota exhaustion, which last minutes to
+/// hours, so the retry schedule has to outlast them or it just converts a vendor problem into
+/// manual work. A successful verdict, allow or reject, is terminal and never retried.
+const RETRY_BASE_SECONDS = 600;
 
 /// Deliberately does not say which category tripped, or how close the others came. That detail
 /// is a tuning guide for anyone probing the threshold, and it is in D1 for us either way.
