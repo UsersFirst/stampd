@@ -1,4 +1,5 @@
-import {useState, type FormEvent} from "react";
+import {useEffect, useState, type FormEvent} from "react";
+import {useQueryClient} from "@tanstack/react-query";
 import {useAccount, useChainId, useSignMessage, useWriteContract, useWaitForTransactionReceipt} from "wagmi";
 import {isAddress} from "viem";
 import {
@@ -31,6 +32,7 @@ export function CreateEventForm() {
     const chainId = useChainId();
     const {writeContractAsync} = useWriteContract();
     const {signMessageAsync} = useSignMessage();
+    const queryClient = useQueryClient();
 
     const [name, setName] = useState("");
     const [description, setDescription] = useState("");
@@ -48,12 +50,26 @@ export function CreateEventForm() {
 
     const {isLoading: isConfirming, isSuccess} = useWaitForTransactionReceipt({hash: txHash});
 
+    // `stage` is what gates the submit button, and the receipt arrives outside the submit handler,
+    // so without this the form sits on "Working…" forever after the event has already been
+    // created. The status text alone said "Event created." while the button stayed disabled.
+    useEffect(() => {
+        if (!isSuccess) return;
+        setStage("done");
+        // The event exists now but every list below is showing a cached read from before it did.
+        void queryClient.invalidateQueries();
+    }, [isSuccess, queryClient]);
+
+    // Revoking in the cleanup covers unmount as well as replacement — navigating away mid-edit
+    // was leaking the object URL for whatever art was selected. Closes item 8 of #1.
+    useEffect(() => {
+        if (!preview) return;
+        return () => URL.revokeObjectURL(preview);
+    }, [preview]);
+
     function onFileChange(selected: File | null) {
         setFile(selected);
-        setPreview((old) => {
-            if (old) URL.revokeObjectURL(old);
-            return selected ? URL.createObjectURL(selected) : null;
-        });
+        setPreview(selected ? URL.createObjectURL(selected) : null);
     }
 
     async function onSubmit(submitEvent: FormEvent) {
@@ -210,7 +226,7 @@ export function CreateEventForm() {
                 </label>
 
                 <button className="btn btn-primary" type="submit" disabled={busy || !address}>
-                    {busy ? "Working…" : "Create event"}
+                    {busy ? "Working…" : stage === "done" ? "Create another event" : "Create event"}
                 </button>
 
                 {status && <p className="status">{status}</p>}

@@ -1,5 +1,6 @@
 import {useCallback, useEffect, useMemo, useState} from "react";
 import {useAccount, useChainId, usePublicClient, useWriteContract, useWaitForTransactionReceipt} from "wagmi";
+import {useQueryClient} from "@tanstack/react-query";
 import {parseEventLogs} from "viem";
 import {stampd1155Abi, type Address} from "@stampd/shared";
 import {useSignableEvents} from "../hooks/useEvents";
@@ -43,6 +44,7 @@ export function ScanAndMint() {
     const chainId = useChainId();
     const publicClient = usePublicClient();
     const {writeContractAsync} = useWriteContract();
+    const queryClient = useQueryClient();
 
     const {contractAddress, events} = useSignableEvents(address);
 
@@ -133,8 +135,12 @@ export function ScanAndMint() {
     }, [receipt]);
 
     useEffect(() => {
-        if (isSuccess) setQueue([]);
-    }, [isSuccess]);
+        if (!isSuccess) return;
+        setQueue([]);
+        // Issued counts and remaining supply are now wrong everywhere on the page until the
+        // cached contract reads are dropped.
+        void queryClient.invalidateQueries();
+    }, [isSuccess, queryClient]);
 
     async function onMint() {
         setError(null);
