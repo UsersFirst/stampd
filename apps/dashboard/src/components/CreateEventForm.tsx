@@ -71,6 +71,7 @@ export function CreateEventForm() {
 
         const uploadCtx = {
             address,
+            chainId,
             signMessage: (message: string) => signMessageAsync({message}),
         };
 

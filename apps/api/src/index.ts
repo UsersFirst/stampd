@@ -24,9 +24,22 @@ export interface Env {
     DB: D1Database;
     /// Comma-separated origins permitted to call this API from a browser.
     ALLOWED_ORIGINS: string;
-    /// Chain whose state is consulted to verify smart-contract-wallet signatures.
-    VERIFY_CHAIN_ID: string;
-    RPC_URL: string;
+    /// RPC endpoints per chain, consulted to verify smart-contract-wallet signatures. A signer
+    /// may legitimately be on either chain, and which one is not ours to choose — see below.
+    RPC_URL_BASE_SEPOLIA: string;
+    RPC_URL_BASE: string;
+}
+
+/// Chains a signature may be produced on. Anything else is rejected rather than guessed at:
+/// picking a chain for the caller is what produced the "Invalid signature" that was really
+/// "verified against the wrong network".
+const VERIFY_CHAINS = {
+    [base.id]: base,
+    [baseSepolia.id]: baseSepolia,
+} as const;
+
+function rpcUrlFor(chainId: number, env: Env): string {
+    return chainId === base.id ? env.RPC_URL_BASE : env.RPC_URL_BASE_SEPOLIA;
 }
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
@@ -90,20 +103,27 @@ async function checkUploadAuth(request: Request, env: Env, digest: string): Prom
     const address = request.headers.get(UPLOAD_HEADERS.address);
     const issued = request.headers.get(UPLOAD_HEADERS.issued);
     const signature = request.headers.get(UPLOAD_HEADERS.signature);
+    const chain = request.headers.get(UPLOAD_HEADERS.chain);
 
-    if (!address || !issued || !signature) return json({error: "Missing upload authorization."}, 401);
+    if (!address || !issued || !signature || !chain) return json({error: "Missing upload authorization."}, 401);
     if (!isAddress(address)) return json({error: "Malformed address."}, 401);
     if (!/^0x[0-9a-fA-F]+$/.test(signature)) return json({error: "Malformed signature."}, 401);
 
     const issuedAt = Number(issued);
     if (!Number.isInteger(issuedAt)) return json({error: "Malformed timestamp."}, 401);
 
+    const chainId = Number(chain);
+    const verifyChain = VERIFY_CHAINS[chainId as keyof typeof VERIFY_CHAINS];
+    if (!verifyChain) return json({error: `Unsupported chain: ${chain}.`}, 400);
+
     const skew = Math.abs(Math.floor(Date.now() / 1000) - issuedAt);
     if (skew > UPLOAD_AUTH_WINDOW_SECONDS) {
         return json({error: "Authorization expired; sign again."}, 401);
     }
 
-    const message = buildUploadAuthMessage({address: address as Address, sha256: digest, issuedAt});
+    // The chain id is inside the signed message, so a caller cannot claim to have signed on one
+    // chain while having signed on another — the message would not match and recovery would fail.
+    const message = buildUploadAuthMessage({address: address as Address, sha256: digest, issuedAt, chainId});
 
     // Plain EOA signatures verify offline. Smart-contract wallets (ERC-1271/6492) need
     // chain state, so only those pay for an RPC round-trip.
@@ -114,9 +134,9 @@ async function checkUploadAuth(request: Request, env: Env, digest: string): Prom
         // fall through to on-chain verification
     }
 
+    const client = createPublicClient({chain: verifyChain, transport: http(rpcUrlFor(chainId, env))});
+
     try {
-        const chain = env.VERIFY_CHAIN_ID === String(base.id) ? base : baseSepolia;
-        const client = createPublicClient({chain, transport: http(env.RPC_URL)});
         const valid = await client.verifyMessage({
             address: address as Address,
             message,
@@ -125,6 +145,26 @@ async function checkUploadAuth(request: Request, env: Env, digest: string): Prom
         if (valid) return null;
     } catch {
         return json({error: "Could not verify signature."}, 503);
+    }
+
+    // A smart-contract wallet with no code on the chain it claims to have signed on is the
+    // common, recoverable case, and "Invalid signature" sends people looking in the wrong place.
+    // Name it, because the fix is to switch networks and sign again.
+    try {
+        const code = await client.getCode({address: address as Address});
+        if (!code || code === "0x") {
+            return json(
+                {
+                    error:
+                        `No wallet contract at this address on ${verifyChain.name}, and the signature is not ` +
+                        `a plain wallet signature. If you signed with a smart wallet on another network, ` +
+                        `switch to ${verifyChain.name} and sign again.`,
+                },
+                401,
+            );
+        }
+    } catch {
+        // The verification result stands on its own; this lookup only improves the message.
     }
 
     return json({error: "Invalid signature."}, 401);

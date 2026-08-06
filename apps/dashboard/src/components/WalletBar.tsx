@@ -1,5 +1,5 @@
 import {useAccount, useConnect, useDisconnect, useChainId, useSwitchChain} from "wagmi";
-import {CHAIN_IDS, isSupportedChain} from "@stampd/shared";
+import {CHAIN_IDS, isDeployedOn} from "@stampd/shared";
 import {Logo} from "./Logo";
 
 function truncate(address: string): string {
@@ -22,7 +22,10 @@ export function WalletBar() {
             </div>
 
             <div className="wallet-actions">
-                {isConnected && !isSupportedChain(chainId) && (
+                {/* Keyed on "is the contract deployed here", not "is this chain known". Base
+                    mainnet is a chain we support in principle and have deployed nothing to, and
+                    treating it as fine is what let an organizer sign an upload there. */}
+                {isConnected && !isDeployedOn(chainId) && (
                     <button className="btn btn-warn" onClick={() => switchChain({chainId: CHAIN_IDS.baseSepolia})}>
                         Switch to Base Sepolia
                     </button>

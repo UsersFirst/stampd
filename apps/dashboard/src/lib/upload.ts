@@ -13,6 +13,9 @@ interface UploadResponse {
 
 export interface UploadContext {
     address: Address;
+    /// The chain the wallet is currently on. Smart-contract wallets sign chain-bound signatures,
+    /// so the Worker has to verify on this chain rather than one it picked in advance.
+    chainId: number;
     signMessage: (message: string) => Promise<`0x${string}`>;
 }
 
@@ -21,7 +24,9 @@ export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 async function post(body: ArrayBuffer, contentType: string, filename: string, ctx: UploadContext): Promise<string> {
     const digest = await sha256Hex(body);
     const issuedAt = Math.floor(Date.now() / 1000);
-    const signature = await ctx.signMessage(buildUploadAuthMessage({address: ctx.address, sha256: digest, issuedAt}));
+    const signature = await ctx.signMessage(
+        buildUploadAuthMessage({address: ctx.address, sha256: digest, issuedAt, chainId: ctx.chainId}),
+    );
 
     const res = await fetch(apiUrl("/api/upload"), {
         method: "POST",
@@ -31,6 +36,7 @@ async function post(body: ArrayBuffer, contentType: string, filename: string, ct
             [UPLOAD_HEADERS.address]: ctx.address,
             [UPLOAD_HEADERS.issued]: String(issuedAt),
             [UPLOAD_HEADERS.signature]: signature,
+            [UPLOAD_HEADERS.chain]: String(ctx.chainId),
         },
         body,
     });

@@ -11,10 +11,12 @@ workers_dev = true
 # Browser origins permitted to call this API. The dashboard is served from GitHub Pages on
 # stampd.usersfirst.com; the Vite dev server is on 5173.
 ALLOWED_ORIGINS = "https://stampd.usersfirst.com"
-# Chain consulted when an upload is signed by a smart-contract wallet (ERC-1271/6492).
-# Plain EOA signatures never reach the RPC.
-VERIFY_CHAIN_ID = "84532"
-RPC_URL = "https://sepolia.base.org"
+# Consulted when an upload is signed by a smart-contract wallet (ERC-1271/6492). The chain is
+# chosen per request from the signed message, not configured here: a Coinbase Smart Wallet's
+# ERC-1271 hash includes the chain id, so a mainnet signature can never verify on Sepolia.
+# Plain EOA signatures never reach an RPC at all.
+RPC_URL_BASE_SEPOLIA = "https://sepolia.base.org"
+RPC_URL_BASE = "https://mainnet.base.org"
 
 [[r2_buckets]]
 binding = "ASSETS_BUCKET"
@@ -34,8 +36,8 @@ migrations_dir = "migrations"
 
 [env.dev.vars]
 ALLOWED_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
-VERIFY_CHAIN_ID = "84532"
-RPC_URL = "https://sepolia.base.org"
+RPC_URL_BASE_SEPOLIA = "https://sepolia.base.org"
+RPC_URL_BASE = "https://mainnet.base.org"
 
 [[env.dev.r2_buckets]]
 binding = "ASSETS_BUCKET"

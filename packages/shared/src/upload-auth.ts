@@ -15,12 +15,24 @@ export const UPLOAD_HEADERS = {
     issued: "x-stampd-issued",
     signature: "x-stampd-signature",
     filename: "x-stampd-filename",
+    chain: "x-stampd-chain",
 } as const;
 
 export interface UploadAuth {
     address: Address;
     sha256: string;
     issuedAt: number;
+    /// The chain the signature was produced on.
+    ///
+    /// Load-bearing for smart-contract wallets and irrelevant for EOAs. A Coinbase Smart Wallet
+    /// verifies via ERC-1271 against a replay-safe hash whose EIP-712 domain includes the chain
+    /// id, so a signature made on Base mainnet can never validate against the same wallet on
+    /// Base Sepolia — by design, and no amount of retrying changes it. The verifier therefore has
+    /// to check on the chain the signer was actually on.
+    ///
+    /// It is inside the signed message, not merely a header, so the chain cannot be swapped in
+    /// transit to point the verifier somewhere the signature happens to validate.
+    chainId: number;
 }
 
 export function buildUploadAuthMessage(auth: UploadAuth): string {
@@ -30,6 +42,7 @@ export function buildUploadAuthMessage(auth: UploadAuth): string {
         `address: ${auth.address.toLowerCase()}`,
         `sha256: ${auth.sha256}`,
         `issued: ${auth.issuedAt}`,
+        `chain: ${auth.chainId}`,
     ].join("\n");
 }
 
