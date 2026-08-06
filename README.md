@@ -160,15 +160,32 @@ If per-badge cost ever needs to come down further, the available lever is replac
 
 ## Roadmap
 
-**Phase 1 — Contracts.** `Stampd1155` with per-event config (supply cap, claim window, transferable flag, signer address), soulbound transfer hook, EIP-712 `ClaimVoucher(eventId, claimer, nonce, expiry)`. Foundry tests covering replay, expiry, supply exhaustion, and transfer blocking. Deploy to Base Sepolia.
+The original plan had attendees claiming badges themselves, from a code. That is not what got
+built first, and the order changed on evidence rather than preference: the organizer-scans path
+turned out to need nothing that did not already exist, so it shipped and works.
 
-**Phase 2 — Claim app.** QR → `/claim/<code>` → Coinbase Smart Wallet onboarding (passkey, no seed phrase) → voucher fetch → sponsored mint. The attendee should never see the word "gas."
+**Done — contracts.** `Stampd1155` with per-event config (supply cap, claim window,
+transferable flag, signer address), soulbound transfers, EIP-712 `ClaimVoucher`, receiver-safe
+batching. Deployed and verified on Base Sepolia.
 
-**Phase 3 — Cloudflare control plane.** D1 schema for `organizers`, `events`, `claim_codes`, `claims`, `rate_limits` — *landed, in `apps/api/migrations/`; the endpoints on top of it are not*. Worker endpoints for code validation and voucher signing. Two code modes: one-time static codes for remote distribution, and rotating short-lived codes (Durable Object, ~30s window) for the in-person "QR on a projector" case.
+**Done — organizer path.** Create an event with art, then scan an attendee's wallet QR — or
+type an ENS or Basename — and issue badges in one `mintBatch`. Uploads are wallet-signed,
+stored in R2, and screened by SafeSearch. This is the working product.
 
-**Phase 4 — Organizer dashboard.** Create an event, upload art, set supply and date window, generate N codes, live rotating-QR display mode, CSV export of claimers.
+**Next — operator dashboard** (issue #4). Google-authenticated read-only view across all
+events, plus the human review queue for images screening could not score.
 
-**Phase 5 — Mainnet.** Base mainnet deploy, paymaster budget controls, basic abuse monitoring.
+**Next — organizer throughput.** Bulk entry for pre-registered attendee lists, and whatever
+else keeps a door moving. The organizer path is the product now, so this is where the effort
+goes.
+
+**Deferred — attendee-driven claiming** (issues #2 and #3). QR codes, claim app, passkey
+onboarding, voucher signing, per-event signer custody. Deliberately not next, because the
+organizer path covers the events being run today. Two things revive it: **throughput**, when
+scanning one attendee at a time makes a queue at the door, and **reach**, when attendees do not
+already have wallets. The D1 schema for it is already applied in production.
+
+**Later — mainnet.** Base mainnet deploy, paymaster budget controls, abuse monitoring.
 
 ## Explicit non-goals for v1
 
