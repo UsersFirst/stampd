@@ -324,6 +324,30 @@ input[type="checkbox"] {
     gap: 1rem;
 }
 
+/* Step markers. The Attendees screen is two steps by default, and saying so beats making
+   someone infer it from the layout. */
+.step {
+    margin: 1.25rem 0 0;
+    font-size: 0.8rem;
+    font-weight: 550;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+}
+
+/* Visible to screen readers only — the placeholder carries the visual label. */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
+
 /* Scanner. Sized generously because this is used one-handed, on a phone, at a door. */
 .scanner {
     position: relative;
